@@ -1,0 +1,146 @@
+# Ask Your Data — Docker Compose (Phase 01)
+# All services start as skeletons with /health and /ready endpoints.
+# Build context is the repo root so that packages/contracts is accessible.
+
+services:
+  # ── Infrastructure ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: askyourdata
+      POSTGRES_PASSWORD: askyourdata_dev
+      POSTGRES_DB: askyourdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U askyourdata"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ayd
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - ayd
+
+  # ── Application Services ───────────────────────────────────────
+  gateway:
+    build:
+      context: ../../
+      dockerfile: backend/services/gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ayd
+
+  identity:
+    build:
+      context: ../../
+      dockerfile: backend/services/identity/Dockerfile
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ayd
+
+  catalog:
+    build:
+      context: ../../
+      dockerfile: backend/services/catalog/Dockerfile
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ayd
+
+  query-execution:
+    build:
+      context: ../../
+      dockerfile: backend/services/query_execution/Dockerfile
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ayd
+
+  orchestrator:
+    build:
+      context: ../../
+      dockerfile: backend/services/orchestrator/Dockerfile
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ayd
+
+  visualization:
+    build:
+      context: ../../
+      dockerfile: backend/services/visualization/Dockerfile
+    ports:
+      - "8005:8005"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ayd
+
+volumes:
+  pgdata:
+
+networks:
+  ayd:
+    driver: bridge
