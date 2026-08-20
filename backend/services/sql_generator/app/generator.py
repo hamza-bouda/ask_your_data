@@ -1,40 +1,65 @@
-"""SQL Generation Logic (Mock Version).
+"""SQL Generation Logic.
 
-In a real implementation, this service would take the user query and the database schema
-(retrieved from the Semantic Router/Catalog) and use an LLM (e.g. GPT-4, Llama 3) to generate
-a valid PostgreSQL query.
-
-Here we use a mock implementation for testing architecture.
+Uses DeepSeek API to generate valid PostgreSQL queries based on schemas.
 """
+import os
+from typing import Any, Optional
+from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
 
-from typing import Any
-from pydantic import BaseModel
+try:
+    from app.models import SqlDraft
+    from app.prompts import SQL_GENERATION_PROMPT, SQL_REPAIR_PROMPT
+except ImportError:
+    from backend.services.sql_generator.app.models import SqlDraft
+    from backend.services.sql_generator.app.prompts import SQL_GENERATION_PROMPT, SQL_REPAIR_PROMPT
 
+load_dotenv()
 
-class SqlResult(BaseModel):
-    sql_query: str
-    explanation: str
-
-
-def generate_sql(query: str, schema: list[dict[str, Any]]) -> SqlResult:
-    """Generate a SQL query based on natural language and a database schema."""
-    q = query.lower()
-    
-    # Mock responses based on keywords in the query
-    if "combien" in q and "utilisateur" in q:
-        return SqlResult(
-            sql_query="SELECT COUNT(*) FROM users;",
-            explanation="Compte le nombre total d'utilisateurs enregistrés dans la table users."
-        )
-        
-    if "ventes" in q and "total" in q:
-        return SqlResult(
-            sql_query="SELECT SUM(amount) FROM sales;",
-            explanation="Calcule la somme de tous les montants dans la table sales."
-        )
-        
-    # Default fallback mock response
-    return SqlResult(
-        sql_query="SELECT * FROM users LIMIT 10;",
-        explanation="Requête par défaut sélectionnant les 10 premiers utilisateurs."
+def _get_llm():
+    return ChatOpenAI(
+        model="deepseek-chat", 
+        api_key=os.getenv("DEEPSEEK_API_KEY"), 
+        base_url="https://api.deepseek.com/v1",
+        max_retries=2
     )
+
+def generate_sql(query: str, schema: dict[str, Any]) -> SqlDraft:
+    """Generate a SQL query based on natural language and a database schema."""
+    llm = _get_llm()
+    structured_llm = llm.with_structured_output(SqlDraft)
+    
+    schema_str = str(schema)
+    
+    chain = SQL_GENERATION_PROMPT | structured_llm
+    
+    try:
+        result = chain.invoke({
+            "schema_context": schema_str,
+            "question": query
+        })
+        return result
+    except Exception as e:
+        # Provide a fallback or raise
+        raise RuntimeError(f"LLM Generation failed: {e}")
+
+def repair_sql(query: str, schema: dict[str, Any], previous_sql: str, error_message: str) -> SqlDraft:
+    """Attempt to repair a broken SQL query."""
+    llm = _get_llm()
+    structured_llm = llm.with_structured_output(SqlDraft)
+    
+    schema_str = str(schema)
+    
+    chain = SQL_REPAIR_PROMPT | structured_llm
+    
+    try:
+        result = chain.invoke({
+            "schema_context": schema_str,
+            "question": query,
+            "previous_sql": previous_sql,
+            "error_message": error_message
+        })
+        return result
+    except Exception as e:
+        raise RuntimeError(f"LLM Repair failed: {e}")
+

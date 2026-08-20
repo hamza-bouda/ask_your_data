@@ -1,37 +1,52 @@
-"""Tests for the Semantic Router Service — Phase 04 Definition of Done."""
+"""Tests for the Semantic Router Service."""
 
 import pytest
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from backend.services.semantic_router.app.main import app
+from backend.services.semantic_router.app.router import RouteResult, Intent
 
 client = TestClient(app)
 
-# ── 1. Router Tests ──────────────────────────────────────────────
-
-def test_route_data_query():
-    """A standard query should be routed as DATA_QUERY."""
-    response = client.post("/internal/route", json={"query": "Combien y a-t-il d'utilisateurs ?"})
+@patch("backend.services.semantic_router.app.router._get_llm")
+def test_route_data_query(mock_get_llm):
+    """Test routing a normal data query."""
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_get_llm.return_value = mock_llm
+    mock_llm.with_structured_output.return_value = mock_structured
+    
+    mock_structured.invoke.return_value = RouteResult(
+        intent=Intent.DATA_QUERY,
+        confidence=0.9,
+        clarification_options=[]
+    )
+    
+    response = client.post("/internal/route", json={"query": "Combien d'utilisateurs ?"})
     assert response.status_code == 200
     data = response.json()
     assert data["intent"] == "DATA_QUERY"
-    assert data["confidence"] > 0.0
 
-def test_route_chart_generation():
-    """A query asking for a chart should be routed as CHART_GENERATION."""
-    response = client.post("/internal/route", json={"query": "Fais-moi un graphique des ventes"})
+@patch("backend.services.semantic_router.app.router._get_llm")
+def test_route_ambiguous_query(mock_get_llm):
+    """Test routing an ambiguous query requiring clarification."""
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_get_llm.return_value = mock_llm
+    mock_llm.with_structured_output.return_value = mock_structured
+    
+    mock_structured.invoke.return_value = RouteResult(
+        intent=Intent.AMBIGUOUS,
+        confidence=0.8,
+        clarification_options=["Option A", "Option B"]
+    )
+    
+    response = client.post("/internal/route", json={"query": "Le CA total"})
     assert response.status_code == 200
     data = response.json()
-    assert data["intent"] == "CHART_GENERATION"
-    assert data["confidence"] > 0.0
-
-def test_route_unrelated():
-    """A chit-chat query should be routed as UNRELATED."""
-    response = client.post("/internal/route", json={"query": "Donne-moi une recette de crêpes"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["intent"] == "UNRELATED"
-    assert data["confidence"] > 0.0
+    assert data["intent"] == "AMBIGUOUS"
+    assert len(data["clarification_options"]) == 2
 
 def test_route_empty_query():
     """An empty query should be rejected."""
