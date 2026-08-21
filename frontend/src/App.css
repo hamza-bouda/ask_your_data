@@ -357,6 +357,135 @@
   flex-direction: row;
 }
 
+/* Data administration */
+.admin-source-card,
+.admin-panel,
+.admin-tabs {
+  margin-bottom: 24px;
+}
+
+.admin-date {
+  font-size: 0.9rem;
+}
+
+.tabs-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tabs-header button {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.tabs-header button:hover,
+.tabs-header button.active {
+  color: var(--text-main);
+}
+
+.tabs-header button.active {
+  border-bottom-color: var(--accent);
+}
+
+.admin-catalog {
+  min-height: 560px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  overflow: hidden;
+}
+
+.admin-panel-heading,
+.admin-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.admin-panel-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.admin-panel-heading p,
+.muted-copy,
+.table-header p {
+  color: var(--text-muted);
+}
+
+.admin-form {
+  display: grid;
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.admin-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.admin-form input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sql-input,
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.table-scroll .data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-scroll th,
+.table-scroll td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+}
+
+.danger-button {
+  background: #b91c1c;
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 6px 9px;
+}
+
+.danger-button:disabled { opacity: .6; cursor: not-allowed; }
+.denied-label { color: var(--text-muted); text-decoration: line-through; }
+
+.policy-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, .12);
+  color: #fca5a5;
+}
+
 .explorer-sidebar {
   width: 300px;
   border-right: 1px solid var(--border-color);
