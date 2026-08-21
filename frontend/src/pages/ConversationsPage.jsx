@@ -30,28 +30,6 @@ export default function ConversationsPage() {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  useEffect(() => {
-    // Load conversations list
-    const initPage = async () => {
-      try {
-        const convs = await getConversations();
-        setConversations(convs);
-        if (convs.length > 0) {
-          const latestConvId = convs[0].id;
-          setConversationId(latestConvId);
-          await loadConversationMessages(latestConvId);
-        } else {
-          setMessages([
-            { role: 'assistant', content: "Bonjour ! Je suis AskYourData. Posez-moi une question sur vos données (ex: 'Combien y a-t-il d'utilisateurs ?')." }
-          ]);
-        }
-      } catch (error) {
-        console.error("Failed to load conversations", error);
-      }
-    };
-    initPage();
-  }, []);
-
   const loadConversationMessages = async (id) => {
     try {
       const data = await getConversation(id);
@@ -82,6 +60,24 @@ export default function ConversationsPage() {
     }
   };
 
+  useEffect(() => {
+    const initPage = async () => {
+      try {
+        const convs = await getConversations();
+        setConversations(convs);
+        if (convs.length > 0) {
+          setConversationId(convs[0].id);
+          await loadConversationMessages(convs[0].id);
+        } else {
+          setMessages([{ role: 'assistant', content: "Bonjour ! Je suis AskYourData. Posez-moi une question sur vos données (ex: 'Combien y a-t-il d'utilisateurs ?')." }]);
+        }
+      } catch (error) {
+        console.error("Failed to load conversations", error);
+      }
+    };
+    initPage();
+  }, []);
+
   const handleSelectConversation = async (id) => {
     if (id === conversationId) return;
     setConversationId(id);
@@ -91,7 +87,7 @@ export default function ConversationsPage() {
   const handleNewConversation = async () => {
     try {
       const conv = await createConversation();
-      setConversations([{ id: conv.id, title: conv.title || "Nouvelle conversation" }, ...conversations]);
+      setConversations((current) => [{ id: conv.id, title: conv.title || "Nouvelle conversation" }, ...current]);
       setConversationId(conv.id);
       setMessages([
         { role: 'assistant', content: "Nouvelle conversation démarrée ! Que voulez-vous savoir ?" }
@@ -117,7 +113,7 @@ export default function ConversationsPage() {
         const newConv = await createConversation();
         currentConvId = newConv.id;
         setConversationId(currentConvId);
-        setConversations([{ id: newConv.id, title: newConv.title || "Nouvelle conversation" }, ...conversations]);
+        setConversations((current) => [{ id: newConv.id, title: newConv.title || "Nouvelle conversation" }, ...current]);
       }
 
       const queuedRun = await sendMessage(currentConvId, userMessage);
@@ -174,6 +170,7 @@ export default function ConversationsPage() {
       setConversations(convs);
 
     } catch (error) {
+      console.error('Conversation run failed', error);
       setMessages(prev => [...prev, { 
         role: 'assistant', 
         content: "Désolé, une erreur s'est produite." 
