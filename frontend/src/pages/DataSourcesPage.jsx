@@ -32,7 +32,14 @@ export default function DataSourcesPage() {
     setError(null);
     try {
       await registerDatabase(connectionString);
-      await syncAdminDatasource('primary');
+      // The gateway validates that an admin can only operate on the source
+      // belonging to the current tenant. Retrieve its server-issued id instead
+      // of relying on an old placeholder such as "primary".
+      const registeredSource = await getDataSource();
+      if (!registeredSource?.id) {
+        throw new Error('Datasource registration did not return a source id');
+      }
+      await syncAdminDatasource(registeredSource.id);
       setShowForm(false);
       await fetchSourceStatus();
     } catch (err) {
