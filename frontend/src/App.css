@@ -278,6 +278,18 @@
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+.datasource-page-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.datasource-card.archived {
+  opacity: .68;
+  background: rgba(30, 41, 59, .35);
+}
+
 .source-dialect { font-size: 1rem; text-transform: uppercase; }
 .datasource-add { margin-top: 20px; width: fit-content; }
 .datasource-form { margin-top: 20px; max-width: 600px; }

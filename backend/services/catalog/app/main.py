@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from fastapi import Request, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlalchemy import create_engine, inspect, text
@@ -63,7 +63,7 @@ def log_audit(db: Session, tenant_id: str, user_id: str, action: str, target: st
     # Don't commit here, let the caller commit the transaction
 
 
-def source_from_request(db: Session, request: Request, *, active_only: bool = False) -> DataSource:
+def source_from_request(db: Session, request: Request, *, active_only: bool = True) -> DataSource:
     """Resolve a tenant-owned datasource, requiring an explicit choice when needed."""
     tenant_id = request.headers.get("x-tenant-id", "acme")
     source_id = request.headers.get("x-source-id")
@@ -132,6 +132,12 @@ class SearchRequest(BaseModel):
 
 class PolicyUpdateRequest(BaseModel):
     is_allowed: bool
+
+
+class SourceUpdateRequest(BaseModel):
+    """Non-secret lifecycle changes for an already registered datasource."""
+    name: Optional[str] = None
+    status: Optional[Literal["active", "archived"]] = None
 
 @app.post("/api/v1/catalog/register")
 def register_database(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
@@ -504,8 +510,43 @@ def serialize_source(db: Session, db_record: DataSource) -> dict:
 def list_sources(request: Request, db: Session = Depends(get_db)):
     """List tenant-owned source metadata without ever exposing credentials."""
     tenant_id = request.headers.get("x-tenant-id", "acme")
-    sources = db.query(DataSource).filter(DataSource.tenant_id == tenant_id).order_by(DataSource.created_at.asc()).all()
+    is_admin = request.headers.get("x-is-admin", "false").lower() == "true"
+    query = db.query(DataSource).filter(DataSource.tenant_id == tenant_id)
+    if not is_admin:
+        query = query.filter(DataSource.status != "archived")
+    sources = query.order_by(DataSource.created_at.asc()).all()
     return {"sources": [serialize_source(db, source) for source in sources]}
+
+
+@app.patch("/api/v1/catalog/sources/{source_id}")
+def update_source(source_id: str, body: SourceUpdateRequest, request: Request, db: Session = Depends(get_db)):
+    """Rename, archive or reactivate a datasource without deleting audit history."""
+    tenant_id = request.headers.get("x-tenant-id", "acme")
+    user_id = request.headers.get("x-user-id", "system")
+    correlation_id = request.headers.get("x-correlation-id")
+    source = db.query(DataSource).filter(DataSource.id == source_id, DataSource.tenant_id == tenant_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Datasource name cannot be empty")
+        duplicate = db.query(DataSource).filter(
+            DataSource.tenant_id == tenant_id,
+            DataSource.name == name,
+            DataSource.id != source.id,
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="A datasource with this name already exists")
+        source.name = name
+    if body.status is not None:
+        source.status = body.status
+
+    action = "archive_source" if body.status == "archived" else "update_source"
+    log_audit(db, tenant_id, user_id, action, f"source:{source.id}", correlation_id)
+    db.commit()
+    return serialize_source(db, source)
 
 
 @app.get("/api/v1/catalog/source")
