@@ -2,7 +2,7 @@ import React from 'react';
 import { User, Bot } from 'lucide-react';
 import './MessageBubble.css';
 
-const MessageBubble = ({ role, content, isChart, chartData }) => {
+const MessageBubble = ({ role, content }) => {
   const isUser = role === 'user';
   
   return (
