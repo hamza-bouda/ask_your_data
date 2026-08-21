@@ -140,6 +140,24 @@ async def get_source_proxy(request: Request, context: TenantContext = Depends(ge
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=exc.response.status_code, detail="Catalog error")
 
+
+@app.get("/api/v1/catalog/sources")
+async def list_sources_proxy(request: Request, context: TenantContext = Depends(get_tenant_context)):
+    """Expose tenant-owned source metadata so analysts can select their scope."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "http://catalog:8002/api/v1/catalog/sources",
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Catalog service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Catalog error")
+
 @app.get("/api/v1/catalog/tables")
 async def get_tables_proxy(request: Request, context: TenantContext = Depends(get_tenant_context)):
     """Proxy catalog tables request to catalog service."""

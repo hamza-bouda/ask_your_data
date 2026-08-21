@@ -11,6 +11,10 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  const sourceId = localStorage.getItem('activeSourceId');
+  if (sourceId) {
+    config.headers['X-Source-Id'] = sourceId;
+  }
   return config;
 });
 
@@ -19,8 +23,19 @@ export const login = async (username, password) => {
   return response.data;
 };
 
-export const registerDatabase = async (connectionString) => {
-  const response = await api.post('/api/v1/catalog/register', { connection_string: connectionString });
+export const getActiveSourceId = () => localStorage.getItem('activeSourceId');
+
+export const setActiveSourceId = (sourceId) => {
+  if (sourceId) localStorage.setItem('activeSourceId', sourceId);
+  else localStorage.removeItem('activeSourceId');
+};
+
+export const registerDatabase = async (connectionString, { name, sourceId } = {}) => {
+  const response = await api.post('/api/v1/catalog/register', {
+    connection_string: connectionString,
+    name: name || undefined,
+    source_id: sourceId || undefined,
+  });
   return response.data;
 };
 
@@ -114,6 +129,11 @@ export const sendMessage = async (conversationId, message) => {
 export const getDataSource = async () => {
   const response = await api.get('/api/v1/catalog/source');
   return response.data;
+};
+
+export const getDataSources = async () => {
+  const response = await api.get('/api/v1/catalog/sources');
+  return response.data.sources || [];
 };
 
 export const getTables = async () => {

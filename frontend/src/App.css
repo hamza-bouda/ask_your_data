@@ -246,6 +246,27 @@
   max-width: 600px;
 }
 
+.datasource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  max-width: 980px;
+}
+
+.datasource-card {
+  min-height: 180px;
+  max-width: none;
+}
+
+.datasource-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.source-dialect { font-size: 1rem; text-transform: uppercase; }
+.datasource-add { margin-top: 20px; width: fit-content; }
+.datasource-form { margin-top: 20px; max-width: 600px; }
+
 .source-card-header {
   display: flex;
   justify-content: space-between;
