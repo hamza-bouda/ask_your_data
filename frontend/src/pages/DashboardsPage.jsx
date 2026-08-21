@@ -1,110 +1,71 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { BarChart3, Globe2, LockKeyhole, Plus, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
+
+const visibilityLabel = (visibility) => visibility === 'tenant_viewers' ? 'Partagé avec l’organisation' : 'Privé';
 
 const DashboardsPage = () => {
   const [dashboards, setDashboards] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
+  const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [newVis, setNewVis] = useState('private');
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({ name: '', description: '', visibility: 'private' });
 
-  useEffect(() => {
-    fetchDashboards();
+  const fetchDashboards = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.get('/v1/dashboards');
+      setDashboards(Array.isArray(data) ? data : []);
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'Impossible de charger les dashboards.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const fetchDashboards = async () => {
-    try {
-      const res = await api.get('/v1/dashboards');
-      setDashboards(Array.isArray(res.data) ? res.data : []);
-      setLoading(false);
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message);
-      setLoading(false);
-    }
+  useEffect(() => { fetchDashboards(); }, [fetchDashboards]);
+
+  const closeCreate = () => {
+    setShowCreate(false);
+    setDraft({ name: '', description: '', visibility: 'private' });
   };
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    setCreating(true);
+    setError('');
     try {
-      await api.post('/v1/dashboards', {
-        name: newName,
-        description: newDesc,
-        visibility: newVis
-      });
-      setShowCreate(false);
-      setNewName('');
-      setNewDesc('');
-      setNewVis('private');
-      fetchDashboards();
-    } catch (err) {
-      alert("Error creating dashboard: " + err.message);
+      await api.post('/v1/dashboards', draft);
+      closeCreate();
+      await fetchDashboards();
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'Impossible de créer le dashboard.');
+    } finally {
+      setCreating(false);
     }
   };
-
-  if (loading) return <div className="p-4">Loading dashboards...</div>;
-  if (error) return <div className="p-4 text-red-500">Error: {error}</div>;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Dashboards</h1>
-        <button 
-          onClick={() => setShowCreate(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Create Dashboard
-        </button>
-      </div>
-
-      {showCreate && (
-        <div className="mb-6 p-4 border rounded bg-gray-50 dark:bg-gray-800">
-          <h2 className="text-xl mb-4">New Dashboard</h2>
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Name</label>
-              <input required value={newName} onChange={e=>setNewName(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Description</label>
-              <input value={newDesc} onChange={e=>setNewDesc(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Visibility</label>
-              <select value={newVis} onChange={e=>setNewVis(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700">
-                <option value="private">Private</option>
-                <option value="tenant_viewers">Shared with Tenant</option>
-              </select>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 border rounded hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Create</button>
-            </div>
-          </form>
+    <div className="page-container dashboard-page">
+      <header className="page-header dashboard-header">
+        <div>
+          <p className="eyebrow"><BarChart3 size={15} /> Analyse partagée</p>
+          <h1>Dashboards</h1>
+          <p>Regroupez les résultats fiables de vos conversations pour les consulter ou les partager.</p>
         </div>
-      )}
-
-      {dashboards.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          No dashboards found. Create one to get started.
+        <div className="dashboard-header-actions">
+          <button type="button" className="icon-btn" title="Actualiser" aria-label="Actualiser les dashboards" onClick={fetchDashboards} disabled={loading}>
+            <RefreshCw size={18} className={loading ? 'spinner' : ''} />
+          </button>
+          <button type="button" className="btn-primary" onClick={() => setShowCreate(true)}><Plus size={18} /> Nouveau dashboard</button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {dashboards.map(d => (
-            <Link key={d.id} to={`/dashboards/${d.id}`} className="block p-6 border rounded-lg hover:shadow-lg transition-shadow bg-white dark:bg-gray-800">
-              <h3 className="text-xl font-semibold mb-2">{d.name}</h3>
-              <p className="text-gray-600 dark:text-gray-400 mb-4">{d.description || 'No description'}</p>
-              <div className="flex justify-between items-center text-sm text-gray-500">
-                <span>{d.visibility}</span>
-                <span>{new Date(d.created_at).toLocaleDateString()}</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+      </header>
+      {error && <div className="error-message" role="alert">{error}</div>}
+      {showCreate && <section className="dashboard-create card" aria-labelledby="dashboard-create-title"><div><h2 id="dashboard-create-title">Créer un dashboard</h2><p>Vous pourrez y ajouter les résultats sauvegardés depuis une conversation.</p></div><form className="dashboard-form" onSubmit={handleCreate}><label>Nom<input required maxLength="120" autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Ex. Vue commerciale hebdomadaire" /></label><label>Description <span className="field-optional">optionnelle</span><textarea maxLength="500" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Objectif et périmètre de l’analyse" rows="3" /></label><fieldset className="visibility-options"><legend>Visibilité</legend><label className="visibility-option"><input type="radio" name="visibility" value="private" checked={draft.visibility === 'private'} onChange={(event) => setDraft({ ...draft, visibility: event.target.value })} /><LockKeyhole size={17} /><span><strong>Privé</strong><small>Visible uniquement par vous.</small></span></label><label className="visibility-option"><input type="radio" name="visibility" value="tenant_viewers" checked={draft.visibility === 'tenant_viewers'} onChange={(event) => setDraft({ ...draft, visibility: event.target.value })} /><Globe2 size={17} /><span><strong>Organisation</strong><small>Visible par les membres autorisés de votre organisation.</small></span></label></fieldset><div className="form-actions"><button type="button" className="btn-secondary" onClick={closeCreate} disabled={creating}>Annuler</button><button type="submit" className="btn-primary" disabled={creating}>{creating ? 'Création…' : 'Créer le dashboard'}</button></div></form></section>}
+      {loading ? <div className="page-loading"><RefreshCw size={22} className="spinner" /> Chargement des dashboards…</div> : dashboards.length === 0 ? <section className="empty-state dashboard-empty"><div className="empty-state-icon"><BarChart3 size={30} /></div><h2>Votre espace d’analyse est prêt</h2><p>Créez un dashboard, puis ajoutez-y un résultat depuis une conversation ou la page Résultats.</p><button type="button" className="btn-primary" onClick={() => setShowCreate(true)}><Plus size={18} /> Créer mon premier dashboard</button></section> : <section className="dashboard-grid" aria-label="Liste des dashboards">{dashboards.map((dashboard) => <Link key={dashboard.id} to={`/dashboards/${dashboard.id}`} className="dashboard-card"><div className="dashboard-card-top"><span className={`visibility-badge ${dashboard.visibility}`}>{dashboard.visibility === 'tenant_viewers' ? <Globe2 size={14} /> : <LockKeyhole size={14} />}{visibilityLabel(dashboard.visibility)}</span><BarChart3 size={22} className="dashboard-card-icon" /></div><h2>{dashboard.name}</h2><p>{dashboard.description || 'Aucune description.'}</p><footer>Créé le {new Date(dashboard.created_at).toLocaleDateString('fr-FR')}</footer></Link>)}</section>}
     </div>
   );
 };

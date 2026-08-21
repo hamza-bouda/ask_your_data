@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft, Download, FileWarning, Globe2, LockKeyhole, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import ChartRenderer from '../components/ChartRenderer';
@@ -8,137 +9,20 @@ const DashboardDetailPage = () => {
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ name: '', description: '', visibility: 'private' });
-
-  useEffect(() => {
-    fetchDashboard();
-  }, [id]);
-
-  const fetchDashboard = async () => {
-    try {
-      const res = await api.get(`/v1/dashboards/${id}`);
-      setDashboard(res.data);
-      setDraft({ name: res.data.name, description: res.data.description || '', visibility: res.data.visibility });
-      setLoading(false);
-    } catch (err) {
-      setError(err.response?.data?.detail || err.message);
-      setLoading(false);
-    }
-  };
-
-  const saveDashboard = async (event) => {
-    event.preventDefault();
-    try {
-      await api.patch(`/v1/dashboards/${id}`, draft);
-      setEditing(false);
-      await fetchDashboard();
-    } catch (err) {
-      alert("Impossible d’enregistrer le dashboard : " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  const deleteDashboard = async () => {
-    if (!window.confirm("Supprimer définitivement ce dashboard ?")) return;
-    try {
-      await api.delete(`/v1/dashboards/${id}`);
-      navigate('/dashboards');
-    } catch (err) {
-      alert("Impossible de supprimer le dashboard : " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  const removeItem = async (itemId) => {
-    if (!window.confirm("Remove this item?")) return;
-    try {
-      await api.delete(`/v1/dashboards/${id}/items/${itemId}`);
-      fetchDashboard();
-    } catch (err) {
-      alert("Error removing item: " + err.message);
-    }
-  };
-
-  const handleExport = async (messageId) => {
-    try {
-      const res = await api.get(`/v1/results/${messageId}/export?format=csv`, {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `export_${messageId}.csv`);
-      document.body.appendChild(link);
-      link.click();
-    } catch (err) {
-      alert("Error exporting CSV. It might be blocked by a policy or unavailable.");
-    }
-  };
-
-  if (loading) return <div className="p-4">Loading dashboard...</div>;
-  if (error) return <div className="p-4 text-red-500">Error: {error}</div>;
-  if (!dashboard) return <div className="p-4">Dashboard not found</div>;
-
-  return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <Link to="/dashboards" className="text-blue-500 hover:underline mb-2 inline-block">&larr; Back to Dashboards</Link>
-        {editing ? (
-          <form onSubmit={saveDashboard} style={{ display: 'grid', gap: '10px', maxWidth: '600px' }}>
-            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required aria-label="Nom du dashboard" />
-            <textarea value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} aria-label="Description du dashboard" />
-            <select value={draft.visibility} onChange={e => setDraft({ ...draft, visibility: e.target.value })} aria-label="Visibilité">
-              <option value="private">Privé</option>
-              <option value="tenant_viewers">Partagé avec le tenant</option>
-            </select>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button type="submit" className="btn-primary">Enregistrer</button>
-              <button type="button" className="btn-secondary" onClick={() => setEditing(false)}>Annuler</button>
-            </div>
-          </form>
-        ) : (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <h1 className="text-3xl font-bold">{dashboard.name}</h1>
-              <span className="status-badge">{dashboard.visibility === 'private' ? 'Privé' : 'Partagé'}</span>
-            </div>
-            <p className="text-gray-600 dark:text-gray-400 mt-2">{dashboard.description}</p>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-              <button className="btn-secondary" onClick={() => setEditing(true)}>Modifier</button>
-              <button className="btn-secondary" style={{ color: '#ef4444' }} onClick={deleteDashboard}>Supprimer</button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {dashboard.items.length === 0 ? (
-        <div className="text-center py-12 text-gray-500 border rounded-lg bg-gray-50 dark:bg-gray-800">
-          This dashboard is empty. Add results from the Chat or Results pages.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {dashboard.items.map(item => (
-            <div key={item.id} className="border rounded-lg p-4 bg-white dark:bg-gray-800 shadow flex flex-col">
-              <div className="flex justify-between items-center mb-4 pb-2 border-b">
-                <h3 className="font-semibold text-lg">{item.title}</h3>
-                <div className="flex gap-2">
-                  <button onClick={() => handleExport(item.source_message_id)} className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200">Export CSV</button>
-                  <button onClick={() => removeItem(item.id)} className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">Remove</button>
-                </div>
-              </div>
-              <div className="flex-1">
-                {item.results ? (
-                  <ChartRenderer data={item.results} chartSpec={item.chart_spec} />
-                ) : (
-                  <div className="text-gray-500 text-sm italic">No data available or loading...</div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const fetchDashboard = useCallback(async () => { setLoading(true); setError(''); try { const { data } = await api.get(`/v1/dashboards/${id}`); setDashboard(data); setDraft({ name: data.name, description: data.description || '', visibility: data.visibility }); } catch (requestError) { setError(requestError.response?.data?.detail || 'Impossible de charger ce dashboard.'); } finally { setLoading(false); } }, [id]);
+  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
+  const saveDashboard = async (event) => { event.preventDefault(); setSaving(true); setError(''); try { await api.patch(`/v1/dashboards/${id}`, draft); setEditing(false); await fetchDashboard(); } catch (requestError) { setError(requestError.response?.data?.detail || 'Impossible d’enregistrer le dashboard.'); } finally { setSaving(false); } };
+  const deleteDashboard = async () => { if (!window.confirm('Supprimer définitivement ce dashboard ? Cette action est irréversible.')) return; try { await api.delete(`/v1/dashboards/${id}`); navigate('/dashboards'); } catch (requestError) { setError(requestError.response?.data?.detail || 'Impossible de supprimer le dashboard.'); } };
+  const removeItem = async (itemId) => { if (!window.confirm('Retirer ce résultat du dashboard ?')) return; try { await api.delete(`/v1/dashboards/${id}/items/${itemId}`); await fetchDashboard(); } catch (requestError) { setError(requestError.response?.data?.detail || 'Impossible de retirer ce résultat.'); } };
+  const handleExport = async (messageId) => { try { const response = await api.get(`/v1/results/${messageId}/export`, { params: { format: 'csv' }, responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' })); const link = document.createElement('a'); link.href = url; link.download = `askyourdata-${messageId}.csv`; document.body.appendChild(link); link.click(); link.remove(); window.URL.revokeObjectURL(url); } catch (requestError) { setError(requestError.response?.data?.detail || 'L’export CSV est indisponible pour ce résultat.'); } };
+  if (loading) return <div className="page-loading"><RefreshCw size={22} className="spinner" /> Chargement du dashboard…</div>;
+  if (error && !dashboard) return <div className="page-container"><div className="error-message" role="alert">{error}</div><Link className="btn-secondary" to="/dashboards"><ArrowLeft size={16} /> Retour aux dashboards</Link></div>;
+  if (!dashboard) return null;
+  return <div className="page-container dashboard-detail-page"><Link to="/dashboards" className="back-link"><ArrowLeft size={16} /> Tous les dashboards</Link>{error && <div className="error-message" role="alert">{error}</div>}<header className="dashboard-detail-header">{editing ? <form className="dashboard-edit-form" onSubmit={saveDashboard}><label>Nom<input value={draft.name} required maxLength="120" onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><label>Description<textarea rows="2" maxLength="500" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label><label>Visibilité<select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value })}><option value="private">Privé</option><option value="tenant_viewers">Partagé avec l’organisation</option></select></label><div className="form-actions"><button type="button" className="btn-secondary" disabled={saving} onClick={() => setEditing(false)}>Annuler</button><button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div></form> : <><div><span className={`visibility-badge ${dashboard.visibility}`}>{dashboard.visibility === 'tenant_viewers' ? <Globe2 size={14} /> : <LockKeyhole size={14} />}{dashboard.visibility === 'tenant_viewers' ? 'Partagé avec l’organisation' : 'Privé'}</span><h1>{dashboard.name}</h1>{dashboard.description && <p>{dashboard.description}</p>}</div><div className="dashboard-detail-actions"><button className="btn-secondary" onClick={() => setEditing(true)}><Pencil size={16} /> Modifier</button><button className="btn-danger" onClick={deleteDashboard}><Trash2 size={16} /> Supprimer</button></div></>}</header>{dashboard.items.length === 0 ? <section className="empty-state dashboard-empty"><div className="empty-state-icon"><FileWarning size={30} /></div><h2>Ce dashboard ne contient aucun résultat</h2><p>Depuis la conversation ou les résultats, utilisez « Sauvegarder » pour ajouter un graphique ou un tableau ici.</p></section> : <section className="dashboard-item-grid" aria-label="Résultats du dashboard">{dashboard.items.map((item) => <article key={item.id} className="dashboard-item-card"><header><div><h2>{item.title}</h2>{item.sql_query && <span>Résultat vérifiable · requête SQL disponible</span>}</div><div className="dashboard-item-actions"><button className="icon-btn" title="Exporter le CSV" aria-label={`Exporter ${item.title} au format CSV`} onClick={() => handleExport(item.source_message_id)}><Download size={17} /></button><button className="icon-btn danger-icon" title="Retirer du dashboard" aria-label={`Retirer ${item.title}`} onClick={() => removeItem(item.id)}><Trash2 size={17} /></button></div></header>{item.results?.length ? <ChartRenderer data={item.results} chartSpec={item.chart_spec} /> : <div className="dashboard-item-unavailable">Les données de ce résultat ne sont plus disponibles.</div>}</article>)}</section>}</div>;
 };
 
 export default DashboardDetailPage;
