@@ -34,9 +34,13 @@ def startup_event():
     embedder = SentenceTransformer('BAAI/bge-small-en-v1.5')
     print("Embedding model loaded.")
     
+    app_env = os.getenv("APP_ENV", "development").lower()
+    is_production = app_env in {"production", "prod"}
     fernet_key = os.getenv("FERNET_KEY")
     if not fernet_key:
-        print("WARNING: FERNET_KEY not set. Using a temporary key for dev.")
+        if is_production:
+            raise RuntimeError("FERNET_KEY must be configured in production.")
+        print("WARNING: FERNET_KEY not set. Using a temporary development key.")
         fernet_key = Fernet.generate_key().decode()
     cipher_suite = Fernet(fernet_key.encode())
 
@@ -117,8 +121,9 @@ def register_database(body: RegisterRequest, request: Request, db: Session = Dep
         target_engine = create_engine(body.connection_string)
         with target_engine.connect() as conn:
             pass
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to connect to database: {e}")
+    except Exception:
+        # Driver exceptions can contain host names, usernames, or credentials.
+        raise HTTPException(status_code=400, detail="Failed to connect to database")
 
     # 2. Store encrypted connection string
     encrypted_conn_str = encrypt_secret(body.connection_string)
@@ -163,10 +168,10 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
         target_engine = create_engine(conn_string)
         inspector = inspect(target_engine)
         table_names = inspector.get_table_names()
-    except Exception as e:
+    except Exception:
         db_record.status = "error"
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Failed to sync database: {e}")
+        raise HTTPException(status_code=500, detail="Failed to sync database")
 
     db_record.catalog_version += 1
     current_version = db_record.catalog_version

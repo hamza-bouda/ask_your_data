@@ -23,12 +23,12 @@ from observability import setup_logging, setup_tracing, setup_metrics
 from contracts.tenant import TenantContext
 
 try:
-    from app.config import ORCHESTRATOR_URL
+    from app.config import ORCHESTRATOR_URL, CORS_ALLOW_ORIGINS
     from app.dependencies import get_tenant_context, require_admin
     from app.rate_limit import init_redis, close_redis, check_rate_limit
     from app.middleware import CorrelationIdMiddleware
 except ImportError:
-    from backend.services.gateway.app.config import ORCHESTRATOR_URL
+    from backend.services.gateway.app.config import ORCHESTRATOR_URL, CORS_ALLOW_ORIGINS
     from backend.services.gateway.app.dependencies import get_tenant_context, require_admin
     from backend.services.gateway.app.rate_limit import init_redis, close_redis, check_rate_limit
     from backend.services.gateway.app.middleware import CorrelationIdMiddleware
@@ -49,7 +49,7 @@ app.add_middleware(CorrelationIdMiddleware)
 # Add CORS so frontend can call Gateway
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all origins for dev
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

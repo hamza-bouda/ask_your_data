@@ -4,14 +4,16 @@ Coordinates the end-to-step conversational BI pipeline using LangGraph.
 """
 
 from typing import Any, Optional, List, AsyncGenerator
-from fastapi import HTTPException, Depends, BackgroundTasks, Request
+from fastapi import HTTPException, Depends, BackgroundTasks, Request, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import json
 import traceback
+import hmac
+import os
 
 from app.redis_client import get_redis_client, close_redis_client
 
@@ -46,6 +48,19 @@ except ImportError:
     from backend.services.orchestrator.app.dashboards import router as dashboards_router
 
 app.include_router(dashboards_router)
+
+
+def require_internal_admin_token(
+    x_internal_admin_token: str | None = Header(default=None),
+) -> None:
+    """Keep operational endpoints inaccessible unless explicitly configured."""
+    expected_token = os.getenv("INTERNAL_ADMIN_TOKEN")
+    if not expected_token or not x_internal_admin_token or not hmac.compare_digest(
+        x_internal_admin_token, expected_token
+    ):
+        # A 404 avoids advertising an operational endpoint to unauthenticated callers.
+        raise HTTPException(status_code=404, detail="Not found")
+
 @app.on_event("startup")
 def on_startup():
     create_tables()
@@ -305,9 +320,11 @@ async def get_run_status(run_id: str, tenant_id: str, user_id: str, db: Session 
     return response_data
 
 @app.get("/internal/runs/dlq")
-async def get_dlq_runs(request: Request):
+async def get_dlq_runs(
+    request: Request,
+    _: None = Depends(require_internal_admin_token),
+):
     """Admin endpoint to view DLQ."""
-    # Requires an admin token check ideally, skipping for local MVP
     redis_client = get_redis_client()
     dlq_items = await redis_client.xrange("stream:dlq:runs", "-", "+", count=100)
     
@@ -320,7 +337,10 @@ async def get_dlq_runs(request: Request):
     return {"dlq": results}
 
 @app.get("/internal/runs/stuck")
-async def get_stuck_runs(db: Session = Depends(get_db)):
+async def get_stuck_runs(
+    _: None = Depends(require_internal_admin_token),
+    db: Session = Depends(get_db),
+):
     """Admin endpoint to see runs stuck in pending or running state."""
     # Check for runs stuck for more than 5 minutes
     now = datetime.now(timezone.utc)

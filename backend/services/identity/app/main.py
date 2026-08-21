@@ -24,10 +24,12 @@ try:
     from app.jwt_handler import decode_token, TokenError
     from app.database import get_db, create_tables, SessionLocal
     from app.models import TenantPolicy, RoleBinding, AuthAudit, User
+    from app.config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
 except ImportError:
     from backend.services.identity.app.jwt_handler import decode_token, TokenError
     from backend.services.identity.app.database import get_db, create_tables, SessionLocal
     from backend.services.identity.app.models import TenantPolicy, RoleBinding, AuthAudit, User
+    from backend.services.identity.app.config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
 
 
 app = create_service_app(service_name="identity")
@@ -43,7 +45,9 @@ setup_metrics(app)
 @app.on_event("startup")
 def on_startup() -> None:
     create_tables()
-    # Seed a default user for testing
+    # A default credential is strictly local-development convenience.
+    if not LOCAL_AUTH_ENABLED:
+        return
     db = SessionLocal()
     if not db.query(User).filter(User.username == "hamza").first():
         db.add(User(id="hamza", tenant_id="acme", username="hamza", password="password"))
@@ -216,6 +220,8 @@ def get_me(
 @app.post("/dev/token")
 def create_token(body: DevTokenRequest) -> dict[str, str]:
     """Dev-only: generate a signed JWT for testing."""
+    if not DEV_ENDPOINTS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
     try:
         from app.dev_tokens import create_dev_token
     except ImportError:
@@ -233,6 +239,8 @@ def create_token(body: DevTokenRequest) -> dict[str, str]:
 @app.post("/dev/seed")
 def seed_data(body: SeedRequest, db: Session = Depends(get_db)) -> dict:
     """Dev-only: create a tenant policy and role binding for testing."""
+    if not DEV_ENDPOINTS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
     # Create policy if it doesn't exist
     existing_policy = (
         db.query(TenantPolicy)
@@ -270,6 +278,8 @@ def seed_data(body: SeedRequest, db: Session = Depends(get_db)) -> dict:
 @app.post("/v1/auth/login")
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> dict:
     """Authenticates user and returns a JWT token."""
+    if not LOCAL_AUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="Local authentication is disabled")
     user = db.query(User).filter(User.username == body.username, User.password == body.password).first()
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
