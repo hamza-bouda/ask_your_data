@@ -58,6 +58,42 @@ def log_audit(db: Session, tenant_id: str, user_id: str, action: str, target: st
     # Don't commit here, let the caller commit the transaction
 
 
+def refresh_table_document_policy(db: Session, table: TableSchema) -> None:
+    """Keep the RAG representation aligned with table and column policies.
+
+    A retrieval document is user-facing context for the LLM, so it must not retain
+    column names that the current policy denies.
+    """
+    allowed_columns = [
+        column.column_name
+        for column in table.columns
+        if column.is_allowed and column.is_available
+    ]
+    document = (
+        db.query(CatalogDocument)
+        .filter(
+            CatalogDocument.tenant_id == table.tenant_id,
+            CatalogDocument.doc_type == "table",
+            CatalogDocument.metadata_json.op("->>")("table_name") == table.table_name,
+        )
+        .first()
+    )
+    if not document:
+        return
+
+    document.is_allowed = table.is_allowed and bool(allowed_columns)
+    document.metadata_json = {
+        "table_name": table.table_name,
+        "columns": allowed_columns,
+    }
+    document.content = (
+        f"Table {table.table_name}: {table.description or ''}. "
+        f"Authorized columns: {', '.join(allowed_columns)}."
+    )
+    if embedder:
+        document.embedding = embedder.encode(document.content).tolist()
+
+
 class RegisterRequest(BaseModel):
     connection_string: str
 
@@ -303,6 +339,7 @@ def update_table_policy(table_id: int, body: PolicyUpdateRequest, request: Reque
         
     table.is_allowed = body.is_allowed
     table.modified_by = user_id
+    refresh_table_document_policy(db, table)
     
     action_str = "allow_table" if body.is_allowed else "deny_table"
     log_audit(db, tenant_id, user_id, action_str, f"table:{table.table_name}", correlation_id)
@@ -323,6 +360,7 @@ def update_column_policy(column_id: int, body: PolicyUpdateRequest, request: Req
         
     column.is_allowed = body.is_allowed
     column.modified_by = user_id
+    refresh_table_document_policy(db, column.table)
     
     action_str = "allow_column" if body.is_allowed else "deny_column"
     log_audit(db, tenant_id, user_id, action_str, f"column:{column.column_name} (table:{column.table.table_name})", correlation_id)

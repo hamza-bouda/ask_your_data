@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: API_URL
 });
 
@@ -42,6 +42,18 @@ export const getConversation = async (id) => {
 export const getRun = async (runId) => {
   const response = await api.get(`/v1/runs/${runId}`);
   return response.data;
+};
+
+export const waitForRun = async (runId, timeoutMs = 60000) => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const run = await getRun(runId);
+    if (['completed', 'awaiting_clarification', 'failed', 'error'].includes(run.status)) {
+      return run;
+    }
+    await new Promise(resolve => setTimeout(resolve, 750));
+  }
+  throw new Error("L'analyse prend plus de temps que prévu. Réessayez dans quelques instants.");
 };
 
 export const sendMessage = async (conversationId, message) => {

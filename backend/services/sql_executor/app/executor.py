@@ -45,8 +45,8 @@ def get_allowed_schema(tenant_id: str) -> dict:
             FROM tables t 
             JOIN columns c ON t.id = c.table_id 
             WHERE t.tenant_id = :tenant_id 
-              AND t.is_allowed = 1 
-              AND c.is_allowed = 1
+              AND t.is_allowed IS TRUE
+              AND c.is_allowed IS TRUE
             """),
             {"tenant_id": tenant_id}
         )
@@ -89,6 +89,14 @@ def log_audit(tenant_id: str, sql_query: str, decision: str, duration_ms: int, r
 
 def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "postgres") -> str:
     """Check that the SQL query is safe and allowed, then inject LIMIT."""
+    sqlglot_dialect = {
+        "postgresql": "postgres",
+        "postgres": "postgres",
+        "mysql": "mysql",
+        "sqlite": "sqlite",
+    }.get(dialect)
+    if not sqlglot_dialect:
+        raise SqlExecutionError(f"Unsupported SQL dialect: {dialect}")
     
     # 1. Regex fallback defense
     forbidden_keywords = [
@@ -103,7 +111,7 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
 
     # 2. Parse AST
     try:
-        parsed = sqlglot.parse(sql_query, read=dialect)
+        parsed = sqlglot.parse(sql_query, read=sqlglot_dialect)
     except Exception as e:
         raise SqlExecutionError(f"Failed to parse SQL: {e}")
         
@@ -131,6 +139,55 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
         t_name = table_node.name.lower()
         if t_name not in allowed_schema:
             raise SqlExecutionError(f"Access to table '{table_node.name}' is denied by policy.")
+
+    # Resolve aliases before checking every selected/referenced column.  Table-level
+    # approval alone is insufficient: a user can be allowed to see a table while a
+    # sensitive column remains denied.
+    referenced_tables = set()
+    aliases = {}
+    for table_node in ast.find_all(exp.Table):
+        table_name = table_node.name.lower()
+        referenced_tables.add(table_name)
+        if table_node.alias:
+            aliases[table_node.alias.lower()] = table_name
+
+    # SQL permits ORDER BY a projection alias such as `ORDER BY total DESC`.
+    # The alias originates from an already validated expression, so it is not a
+    # source column that needs a second policy lookup.
+    projection_aliases = {
+        expression.alias.lower()
+        for expression in ast.expressions
+        if isinstance(expression, exp.Alias) and expression.alias
+    }
+
+    for column_node in ast.find_all(exp.Column):
+        column_name = column_node.name.lower()
+        qualifier = (column_node.table or "").lower()
+        if column_name == "*":
+            raise SqlExecutionError(
+                "SELECT * is not allowed. Select explicit columns allowed by policy."
+            )
+
+        if qualifier:
+            table_name = aliases.get(qualifier, qualifier)
+            if table_name not in allowed_schema or column_name not in allowed_schema[table_name]:
+                raise SqlExecutionError(
+                    f"Access to column '{column_node.name}' is denied by policy."
+                )
+            continue
+
+        if column_name in projection_aliases:
+            continue
+
+        matching_tables = [
+            table_name
+            for table_name in referenced_tables
+            if column_name in allowed_schema.get(table_name, set())
+        ]
+        if len(matching_tables) != 1:
+            raise SqlExecutionError(
+                f"Column '{column_node.name}' is not uniquely allowed by policy. Qualify it with an allowed table."
+            )
             
     # 5. Inject LIMIT if missing or too large
     limit_node = ast.args.get("limit")
@@ -145,7 +202,7 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
         except:
             ast = ast.limit(max_limit)
             
-    return ast.sql(dialect=dialect)
+    return ast.sql(dialect=sqlglot_dialect)
 
 
 def execute_query(sql_query: str, tenant_id: str) -> list[dict[str, Any]]:

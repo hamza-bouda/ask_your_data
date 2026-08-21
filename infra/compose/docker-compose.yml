@@ -77,6 +77,8 @@ services:
       dockerfile: backend/services/catalog/Dockerfile
     ports:
       - "8002:8002"
+    env_file:
+      - ../../.env
     depends_on:
       postgres:
         condition: service_healthy
@@ -179,6 +181,8 @@ services:
       dockerfile: backend/services/sql_executor/Dockerfile
     ports:
       - "8007:8007"
+    env_file:
+      - ../../.env
     depends_on:
       postgres:
         condition: service_healthy

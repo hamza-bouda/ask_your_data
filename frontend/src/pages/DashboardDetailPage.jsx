@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
+import { api } from '../services/api';
 import ChartRenderer from '../components/ChartRenderer';
 
 const DashboardDetailPage = () => {
@@ -15,13 +15,11 @@ const DashboardDetailPage = () => {
 
   const fetchDashboard = async () => {
     try {
-      const res = await axios.get(`/api/v1/dashboards/${id}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      const res = await api.get(`/v1/dashboards/${id}`);
       setDashboard(res.data);
       setLoading(false);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message);
       setLoading(false);
     }
   };
@@ -29,9 +27,7 @@ const DashboardDetailPage = () => {
   const removeItem = async (itemId) => {
     if (!window.confirm("Remove this item?")) return;
     try {
-      await axios.delete(`/api/v1/dashboards/${id}/items/${itemId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
+      await api.delete(`/v1/dashboards/${id}/items/${itemId}`);
       fetchDashboard();
     } catch (err) {
       alert("Error removing item: " + err.message);
@@ -40,8 +36,7 @@ const DashboardDetailPage = () => {
 
   const handleExport = async (messageId) => {
     try {
-      const res = await axios.get(`/api/v1/results/${messageId}/export?format=csv`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      const res = await api.get(`/v1/results/${messageId}/export?format=csv`, {
         responseType: 'blob'
       });
       const url = window.URL.createObjectURL(new Blob([res.data]));

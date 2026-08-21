@@ -17,6 +17,11 @@ export default function MainChat() {
   const navigate = useNavigate();
 
   const messagesEndRef = useRef(null);
+  const hasDataResult = (message) => (
+    ['DATA_QUERY', 'CHART_GENERATION'].includes(message.payload?.semantic_plan?.intent)
+    && Array.isArray(message.payload?.results)
+    && message.payload.results.length > 0
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -272,7 +277,7 @@ export default function MainChat() {
                   </div>
                 </div>
               )}
-              {msg.payload?.results && (
+              {hasDataResult(msg) && (
                 <div style={{ maxWidth: '85%', alignSelf: 'flex-start', marginTop: '8px' }}>
                   <ChartRenderer 
                     data={msg.payload.results} 

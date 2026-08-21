@@ -7,6 +7,7 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 import redis.asyncio as redis
+from redis.exceptions import ResponseError, TimeoutError as RedisTimeoutError
 
 from app.database import get_db, create_tables
 from app.orm_models import Conversation, Message, Run
@@ -49,7 +50,7 @@ async def setup_consumer_group(r: redis.Redis):
     try:
         await r.xgroup_create(STREAM_NAME, GROUP_NAME, id="0-0", mkstream=True)
         logger.info(f"Created consumer group {GROUP_NAME} on {STREAM_NAME}")
-    except redis.exceptions.ResponseError as e:
+    except ResponseError as e:
         if "BUSYGROUP" in str(e):
             pass
         else:
@@ -71,6 +72,10 @@ async def claim_abandoned_messages(r: redis.Redis):
                     
         except asyncio.CancelledError:
             break
+        except RedisTimeoutError:
+            # A blocking XREADGROUP timeout simply means there is no work yet.
+            # It is an expected idle state, not an operational failure.
+            continue
         except Exception as e:
             logger.error(f"Error claiming abandoned messages: {e}")
             
@@ -233,15 +238,28 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
                     raise # Raise to avoid ACK so it can be retried by XCLAIM
 
                 final_state = ConversationState(**final_state_dict)
-                run.status = status
-                run.stage = "completed"
+                # Graph node states (for example "visualized") are useful for the
+                # timeline, but persisted runs must expose a stable terminal state.
+                if status == "error":
+                    terminal_status = "failed"
+                elif status == "needs_clarification":
+                    terminal_status = "awaiting_clarification"
+                elif status == "unrelated":
+                    terminal_status = "completed"
+                else:
+                    terminal_status = "completed"
+
+                run.status = terminal_status
+                run.stage = "completed" if terminal_status == "completed" else status
                 run.error_message = error_msg
                 run.completed_at = datetime.now(timezone.utc)
 
                 has_error = error_msg is not None
                 response_text = error_msg if has_error else "Voici les résultats"
 
-                if status == "unrelated" and final_state.results and len(final_state.results) > 0 and "response" in final_state.results[0]:
+                if final_state.response_text:
+                    response_text = final_state.response_text
+                elif status == "unrelated" and final_state.results and len(final_state.results) > 0 and "response" in final_state.results[0]:
                     response_text = final_state.results[0]["response"]
                 elif status == "needs_clarification":
                     response_text = "Je n'ai pas bien compris. Pouvez-vous préciser ?"
@@ -267,10 +285,10 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
                 run.final_message_id = ai_msg.id
                 db.commit()
 
-                if status == "error":
-                    await emit(RunEventType.RUN_FAILED, "completed", "error", {"detail": error_msg})
+                if terminal_status == "failed":
+                    await emit(RunEventType.RUN_FAILED, "completed", terminal_status, {"detail": error_msg})
                 else:
-                    await emit(RunEventType.RESULT_READY, "completed", status, {})
+                    await emit(RunEventType.RESULT_READY, run.stage, terminal_status, {})
 
                 # Successful completion, acknowledge message
                 await r.xack(STREAM_NAME, GROUP_NAME, message_id)
@@ -305,7 +323,13 @@ async def main():
                             # Do not xack, let the claim process pick it up later
         except asyncio.CancelledError:
             break
+        except RedisTimeoutError:
+            continue
         except Exception as e:
+            if "Timeout reading" in str(e):
+                # A blocking Redis read with no pending work is an expected idle
+                # state. Some redis-py backends expose it as a generic timeout.
+                continue
             logger.error(f"Error in main loop: {e}")
             await asyncio.sleep(5)
 

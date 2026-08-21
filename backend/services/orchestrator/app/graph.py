@@ -16,7 +16,7 @@ except ImportError:
 SQL_GENERATOR_URL = "http://sql-generator:8006"
 SQL_EXECUTOR_URL = "http://sql-executor:8007"
 SEMANTIC_ROUTER_URL = "http://semantic-router:8008"
-VISUALIZATION_URL = "http://visualization:8009"
+VISUALIZATION_URL = "http://visualization:8005"
 
 # ── Node Functions ───────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ def retrieve_node(state: ConversationState) -> dict:
         
             return {
                 "status": "retrieved",
-                "context": {"documents": data.get("results", [])}
+                "context": data
             }
         except Exception as e:
             print(f"Error retrieving schema: {e}")
@@ -69,6 +69,19 @@ def plan_node(state: ConversationState) -> dict:
                     "status": "unrelated",
                     "semantic_plan": data,
                     "results": [{"response": "Bonjour ! Je suis AskYourData, votre assistant BI. Posez-moi une question sur vos données !"}]
+                }
+
+            if intent == "CATALOG_QUERY":
+                tables = data.get("source_tables", [])
+                response_text = (
+                    "Tables autorisées disponibles : " + ", ".join(tables) + "."
+                    if tables else
+                    "Aucune table autorisée n'est disponible pour le moment. Demandez à un administrateur d'autoriser des tables dans le catalogue."
+                )
+                return {
+                    "status": "catalog_response",
+                    "semantic_plan": data,
+                    "response_text": response_text,
                 }
             
             return {
@@ -200,6 +213,8 @@ def after_plan(state: ConversationState) -> str:
         return "end"
     if state.status == "unrelated":
         return "end"
+    if state.status == "catalog_response":
+        return "end"
     return "generate_sql"
 
 def after_execute(state: ConversationState) -> str:
@@ -219,7 +234,6 @@ def after_repair(state: ConversationState) -> str:
 
 builder = StateGraph(ConversationState)
 
-builder.add_node("classify", classify_node)
 builder.add_node("retrieve", retrieve_node)
 builder.add_node("plan", plan_node)
 builder.add_node("generate_sql", generate_sql_node)

@@ -56,6 +56,23 @@ CATALOG_URL = os.getenv("CATALOG_URL", "http://catalog:8002")
 def search_catalog(query: str, tenant_id: str) -> CatalogSearchResult:
     """Search the catalog for tables relevant to the query via the Catalog service."""
     try:
+        # Schema discovery needs the complete allowlisted catalog, not a fuzzy RAG
+        # match on the user's natural-language question.
+        normalized = query.lower()
+        is_discovery = any(term in normalized for term in ("table", "schema", "schéma", "catalog", "catalogue", "colonne", "column"))
+        if is_discovery:
+            response = requests.get(
+                f"{CATALOG_URL}/api/v1/catalog/tables",
+                headers={"X-Tenant-Id": tenant_id, "X-Is-Admin": "false"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return CatalogSearchResult(tables=[TableMeta(
+                name=table["table_name"],
+                description=table.get("description", ""),
+                columns=[ColumnMeta(name=column["name"], type=column.get("type", ""), description=column.get("description", "")) for column in table.get("columns", [])],
+            ) for table in response.json().get("tables", [])])
+
         resp = requests.post(
             f"{CATALOG_URL}/internal/catalog/search",
             json={"query": query, "tenant_id": tenant_id, "top_k": 5},
@@ -65,9 +82,17 @@ def search_catalog(query: str, tenant_id: str) -> CatalogSearchResult:
         data = resp.json()
         
         tables = []
-        for t in data.get("results", []):
-            cols = [ColumnMeta(name=c["name"], type=c["type"], description=c.get("description", "")) for c in t["columns"]]
-            tables.append(TableMeta(name=t["table_name"], description=t.get("description", ""), columns=cols))
+        for document in data.get("results", []):
+            metadata = document.get("metadata", {})
+            table_name = metadata.get("table_name")
+            if not table_name:
+                continue
+            columns = metadata.get("columns", [])
+            tables.append(TableMeta(
+                name=table_name,
+                description=document.get("content", ""),
+                columns=[ColumnMeta(name=column, type="", description="") for column in columns],
+            ))
             
         return CatalogSearchResult(tables=tables)
     except Exception as e:

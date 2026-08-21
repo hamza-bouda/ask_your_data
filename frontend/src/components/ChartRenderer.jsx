@@ -12,7 +12,16 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend
+  Legend,
+  AreaChart,
+  Area,
+  ScatterChart,
+  Scatter,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis
 } from 'recharts';
 import { AlertCircle, BarChart3, Table as TableIcon } from 'lucide-react';
 
@@ -68,24 +77,38 @@ const ChartRenderer = ({ data, chartSpec }) => {
       );
     }
 
-    if (chart_type === 'pie') {
+    if (chart_type === 'pie' || chart_type === 'donut') {
+      const pieData = data.length > 12
+        ? [
+            ...[...data]
+              .sort((a, b) => Number(b[y_field] ?? 0) - Number(a[y_field] ?? 0))
+              .slice(0, 11),
+            {
+              [x_field]: 'Autres',
+              [y_field]: [...data]
+                .sort((a, b) => Number(b[y_field] ?? 0) - Number(a[y_field] ?? 0))
+                .slice(11)
+                .reduce((total, row) => total + Number(row[y_field] ?? 0), 0),
+            },
+          ]
+        : data;
       return (
         <div style={{ width: '100%', height: 380, marginTop: '16px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={data}
+                data={pieData}
                 dataKey={y_field}
                 nameKey={x_field}
                 cx="50%"
                 cy="50%"
                 outerRadius={120}
-                innerRadius={45}
+                innerRadius={chart_type === 'donut' ? 70 : 0}
                 paddingAngle={3}
                 label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                labelLine={true}
+                labelLine={pieData.length <= 12}
               >
-                {data.map((_, i) => (
+                {pieData.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
                 ))}
               </Pie>
@@ -119,6 +142,28 @@ const ChartRenderer = ({ data, chartSpec }) => {
       );
     }
 
+    if (chart_type === 'area') {
+      return (
+        <div style={{ width: '100%', height: 380, marginTop: '16px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={data} margin={{ top: 10, right: 20, left: 10, bottom: 50 }}>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.7} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <XAxis dataKey={x_field} stroke="#94a3b8" fontSize={11} angle={-25} textAnchor="end" interval="preserveStartEnd" />
+              <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => v.toLocaleString()} />
+              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} />
+              <Area type="monotone" dataKey={y_field} stroke="#3b82f6" fill="url(#areaGrad)" strokeWidth={3} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
     if (chart_type === 'bar') {
       return (
         <div style={{ width: '100%', height: 380, marginTop: '16px' }}>
@@ -140,6 +185,54 @@ const ChartRenderer = ({ data, chartSpec }) => {
               />
               <Bar dataKey={y_field} fill="url(#barGrad)" radius={[6, 6, 0, 0]} animationDuration={800} />
             </BarChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
+    if (chart_type === 'horizontal_bar') {
+      return (
+        <div style={{ width: '100%', height: Math.max(380, data.length * 38), marginTop: '16px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} layout="vertical" margin={{ top: 10, right: 20, left: 90, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <XAxis type="number" stroke="#94a3b8" fontSize={11} />
+              <YAxis type="category" dataKey={x_field} stroke="#94a3b8" fontSize={11} width={85} />
+              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} />
+              <Bar dataKey={y_field} fill="#3b82f6" radius={[0, 6, 6, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
+    if (chart_type === 'scatter') {
+      return (
+        <div style={{ width: '100%', height: 380, marginTop: '16px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <XAxis type="number" dataKey={x_field} name={x_field} stroke="#94a3b8" />
+              <YAxis type="number" dataKey={y_field} name={y_field} stroke="#94a3b8" />
+              <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} />
+              <Scatter data={data} fill="#8b5cf6" />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+
+    if (chart_type === 'radar') {
+      return (
+        <div style={{ width: '100%', height: 380, marginTop: '16px' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart data={data}>
+              <PolarGrid stroke="rgba(255,255,255,0.15)" />
+              <PolarAngleAxis dataKey={x_field} stroke="#94a3b8" fontSize={11} />
+              <PolarRadiusAxis stroke="#94a3b8" fontSize={11} />
+              <Radar name={y_field} dataKey={y_field} stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.55} />
+              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} />
+            </RadarChart>
           </ResponsiveContainer>
         </div>
       );

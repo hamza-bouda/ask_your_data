@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import DebugPanel from '../components/DebugPanel';
-import { getConversations, createConversation, getConversation, sendMessage } from '../services/api';
+import { getConversations, createConversation, getConversation, sendMessage, waitForRun } from '../services/api';
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState([]);
@@ -16,6 +16,11 @@ export default function ConversationsPage() {
   const [showDebug, setShowDebug] = useState(true);
   
   const messagesEndRef = useRef(null);
+  const hasDataResult = (message) => (
+    ['DATA_QUERY', 'CHART_GENERATION'].includes(message.payload?.semantic_plan?.intent)
+    && Array.isArray(message.payload?.results)
+    && message.payload.results.length > 0
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -115,11 +120,17 @@ export default function ConversationsPage() {
         setConversations([{ id: newConv.id, title: newConv.title || "Nouvelle conversation" }, ...conversations]);
       }
 
-      const response = await sendMessage(currentConvId, userMessage);
+      const queuedRun = await sendMessage(currentConvId, userMessage);
+      const response = await waitForRun(queuedRun.run_id);
+
+      if (['failed', 'error'].includes(response.status)) {
+        throw new Error(response.error_message || "L'analyse n'a pas pu être terminée.");
+      }
       
       const payload = {
         semantic_plan: response.semantic_plan,
         results: response.results,
+        chart_spec: response.chart_spec,
         sql_query: response.sql_draft?.sql_query || response.sql_query,
         error_message: response.error_message,
         clarification_options: response.clarification_options
@@ -136,8 +147,11 @@ export default function ConversationsPage() {
       setDebugData({
         plan: payload.semantic_plan,
         sql: payload.sql_query,
-        error: payload.error_message !== null
+        error: payload.error_message || null
       });
+
+      const convs = await getConversations();
+      setConversations(convs);
 
     } catch (error) {
       setMessages(prev => [...prev, { 
@@ -202,11 +216,12 @@ export default function ConversationsPage() {
             <div key={idx}>
               <MessageBubble role={msg.role === 'assistant' ? 'ai' : msg.role} content={msg.content} />
               
-              {msg.payload?.results && (
+              {hasDataResult(msg) && (
                 <div className="chat-result-container">
                   <ChartRenderer 
                     data={msg.payload.results} 
                     intent={msg.payload.semantic_plan?.intent || 'DATA_QUERY'}
+                    chartSpec={msg.payload.chart_spec}
                   />
                 </div>
               )}

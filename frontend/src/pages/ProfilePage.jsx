@@ -6,7 +6,17 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   // Simulate user data from token/local storage
   const userString = localStorage.getItem('user');
-  const user = userString ? JSON.parse(userString) : { username: 'Utilisateur', tenant: 'ACME Corp', roles: ['Admin', 'Analyst'] };
+  let storedUser = {};
+  try {
+    storedUser = userString ? JSON.parse(userString) : {};
+  } catch {
+    storedUser = {};
+  }
+  const user = {
+    username: storedUser.username || storedUser.id || 'Utilisateur',
+    tenant: storedUser.tenant || storedUser.tenant_id || 'Organisation',
+    roles: Array.isArray(storedUser.roles) && storedUser.roles.length ? storedUser.roles : ['Analyst'],
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -51,7 +61,7 @@ export default function ProfilePage() {
               </div>
               <div className="setting-item placeholder">
                 <label>Email</label>
-                <div className="setting-value disabled">contact@{user.tenant.toLowerCase().replace(/\s+/g, '')}.com</div>
+                <div className="setting-value disabled">Non renseigné</div>
               </div>
             </div>
           </div>

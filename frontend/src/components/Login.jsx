@@ -18,7 +18,7 @@ export default function Login() {
       const data = await login(username, password);
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
-      navigate('/connect');
+      navigate('/sources');
     } catch (err) {
       setError("Identifiants incorrects ou serveur injoignable.");
     } finally {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Database, LayoutDashboard, Settings, HardDrive, LogOut } from 'lucide-react';
+import { MessageSquare, Database, LayoutDashboard, Settings, HardDrive, LogOut, Plug, PanelsTopLeft } from 'lucide-react';
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -17,8 +17,10 @@ export default function Sidebar() {
 
   const navItems = [
     { to: "/chat", icon: MessageSquare, label: "Conversations" },
+    { to: "/sources", icon: Plug, label: "Sources de données" },
     { to: "/explorer", icon: LayoutDashboard, label: "Explorer les données" },
-    { to: "/results", icon: Database, label: "Résultats" }
+    { to: "/results", icon: Database, label: "Résultats" },
+    { to: "/dashboards", icon: PanelsTopLeft, label: "Dashboards" }
   ];
   
   if (isAdmin) {

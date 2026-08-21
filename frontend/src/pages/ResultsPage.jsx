@@ -18,7 +18,11 @@ export default function ResultsPage() {
           const detail = await getConversation(conv.id);
           for (const msg of detail.messages) {
             if (msg.role === 'ai' || msg.role === 'assistant') {
-              if (msg.payload && msg.payload.results && msg.payload.results.length > 0) {
+              if (
+                ['DATA_QUERY', 'CHART_GENERATION'].includes(msg.payload?.semantic_plan?.intent)
+                && Array.isArray(msg.payload.results)
+                && msg.payload.results.length > 0
+              ) {
                 allResults.push({
                   id: msg.id,
                   date: msg.created_at,

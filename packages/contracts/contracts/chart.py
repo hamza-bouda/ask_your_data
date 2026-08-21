@@ -15,8 +15,13 @@ class ChartType(StrEnum):
 
     TABLE = "table"
     LINE = "line"
+    AREA = "area"
     BAR = "bar"
+    HORIZONTAL_BAR = "horizontal_bar"
     PIE = "pie"
+    DONUT = "donut"
+    SCATTER = "scatter"
+    RADAR = "radar"
     METRIC = "metric"
 
 

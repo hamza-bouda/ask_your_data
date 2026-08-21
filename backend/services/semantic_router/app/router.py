@@ -13,6 +13,7 @@ load_dotenv()
 
 class Intent(str, Enum):
     DATA_QUERY = "DATA_QUERY"          
+    CATALOG_QUERY = "CATALOG_QUERY"
     CHART_GENERATION = "CHART_GENERATION"  
     UNRELATED = "UNRELATED"            
     AMBIGUOUS = "AMBIGUOUS"            
@@ -41,8 +42,29 @@ def _get_llm():
         max_retries=2
     )
 
+
+def _is_catalog_request(query: str) -> bool:
+    """Recognise schema discovery requests without relying on an LLM guess."""
+    normalized = query.lower()
+    catalog_terms = ("table", "schema", "schéma", "catalog", "catalogue", "colonne", "column")
+    discovery_terms = ("liste", "list", "nom", "name", "quelle", "quelles", "which", "existe", "available", "disponible", "montre", "affiche", "show")
+    return any(term in normalized for term in catalog_terms) and any(term in normalized for term in discovery_terms)
+
+
+def _context_table_names(context: dict) -> list[str]:
+    return [table["name"] for table in context.get("tables", []) if table.get("name")]
+
 def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
     """Classify the intent and generate a semantic plan based on context."""
+    if _is_catalog_request(query):
+        tables = _context_table_names(context)
+        return {
+            "intent": "CATALOG_QUERY",
+            "confidence": 1.0,
+            "source_tables": tables,
+            "reasoning": "The user is asking to discover the authorized database schema.",
+        }
+
     llm = _get_llm()
     structured_llm = llm.with_structured_output(SemanticPlanOut)
     
@@ -50,6 +72,7 @@ def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
         "You are a semantic router for a BI conversational agent. "
         "Your job is to classify the user's query into one of the following intents:\n"
         "- DATA_QUERY: User is asking a clear question about data.\n"
+        "- CATALOG_QUERY: User asks to list or describe available tables or columns.\n"
         "- CHART_GENERATION: User explicitly asks for a graph, chart, or plot.\n"
         "- UNRELATED: General chatter, hellos, or questions outside a business context.\n"
         "- AMBIGUOUS: The query is too vague, has multiple interpretations, or is missing critical context. "

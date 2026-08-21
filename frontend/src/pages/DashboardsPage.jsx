@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
+import { api } from '../services/api';
 
 const DashboardsPage = () => {
   const [dashboards, setDashboards] = useState([]);
@@ -18,13 +18,11 @@ const DashboardsPage = () => {
 
   const fetchDashboards = async () => {
     try {
-      const res = await axios.get('/api/v1/dashboards', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      });
-      setDashboards(res.data);
+      const res = await api.get('/v1/dashboards');
+      setDashboards(Array.isArray(res.data) ? res.data : []);
       setLoading(false);
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message);
       setLoading(false);
     }
   };
@@ -32,12 +30,10 @@ const DashboardsPage = () => {
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('/api/v1/dashboards', {
+      await api.post('/v1/dashboards', {
         name: newName,
         description: newDesc,
         visibility: newVis
-      }, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       setShowCreate(false);
       setNewName('');

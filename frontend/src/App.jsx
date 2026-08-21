@@ -30,6 +30,7 @@ function App() {
           <Route index element={<Navigate to="/chat" replace />} />
           <Route path="chat" element={<ConversationsPage />} />
           <Route path="explorer" element={<DataExplorerPage />} />
+          <Route path="sources" element={<DataSourcesPage />} />
           <Route path="results" element={<ResultsPage />} />
           <Route path="dashboards" element={<DashboardsPage />} />
           <Route path="dashboards/:id" element={<DashboardDetailPage />} />

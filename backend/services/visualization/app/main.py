@@ -54,6 +54,28 @@ def _is_date_or_time(val: Any) -> bool:
     return False
 
 
+def _requested_chart_type(question: str | None) -> ChartType | None:
+    """Honor an explicit user choice when it is compatible with the result set."""
+    normalized = (question or "").lower()
+    if any(term in normalized for term in ("camembert", "pie chart", "pie chart", "secteur")):
+        return ChartType.PIE
+    if any(term in normalized for term in ("donut", "doughnut", "anneau")):
+        return ChartType.DONUT
+    if any(term in normalized for term in ("barre horizontale", "horizontal bar", "horizontal")):
+        return ChartType.HORIZONTAL_BAR
+    if any(term in normalized for term in ("barre", "bar chart", "histogramme")):
+        return ChartType.BAR
+    if any(term in normalized for term in ("aire", "area chart")):
+        return ChartType.AREA
+    if any(term in normalized for term in ("courbe", "ligne", "line chart", "evolution", "évolution")):
+        return ChartType.LINE
+    if any(term in normalized for term in ("nuage", "scatter", "dispersion")):
+        return ChartType.SCATTER
+    if any(term in normalized for term in ("radar", "toile")):
+        return ChartType.RADAR
+    return None
+
+
 @app.post("/internal/chart-spec", response_model=ChartSpec)
 async def generate_chart_spec(request: ChartSpecRequest):
     """Generates a ChartSpec deterministically based on data shape."""
@@ -68,6 +90,7 @@ async def generate_chart_spec(request: ChartSpecRequest):
         )
 
     keys = list(data[0].keys())
+    requested_type = _requested_chart_type(request.question)
     
     # 1. Single row, single numeric value -> Metric
     if len(data) == 1 and len(keys) == 1 and _is_numeric(data[0][keys[0]]):
@@ -78,8 +101,8 @@ async def generate_chart_spec(request: ChartSpecRequest):
             reason="Un seul nombre retourné, affichage en métrique."
         )
         
-    # Over 50 rows -> Table
-    if len(data) > 50:
+    # Keep the automatic mode readable, but honour an explicit chart choice.
+    if len(data) > 50 and not requested_type:
         return ChartSpec(
             chart_type=ChartType.TABLE,
             title="Tableau de résultats",
@@ -110,11 +133,12 @@ async def generate_chart_spec(request: ChartSpecRequest):
         else:
             cat_cols.append(key)
 
-    # 2. Date/Time + Numeric -> Line
+    # 2. Date/Time + Numeric -> line/area, unless the user explicitly chose
+    # another compatible visualisation.
     if len(date_cols) == 1 and len(numeric_cols) >= 1:
         return ChartSpec(
-            chart_type=ChartType.LINE,
-            title="Évolution temporelle",
+            chart_type=requested_type if requested_type in (ChartType.LINE, ChartType.AREA) else ChartType.LINE,
+            title="Évolution temporelle" if requested_type != ChartType.AREA else "Évolution temporelle (aire)",
             x_field=date_cols[0],
             y_field=numeric_cols[0],
             reason="Présence d'une dimension temporelle et d'une mesure."
@@ -128,6 +152,20 @@ async def generate_chart_spec(request: ChartSpecRequest):
         # Check number of distinct categories
         unique_cats = set(row.get(cat) for row in data if row.get(cat) is not None)
         
+        if requested_type in (ChartType.PIE, ChartType.DONUT, ChartType.BAR, ChartType.HORIZONTAL_BAR, ChartType.RADAR):
+            return ChartSpec(
+                chart_type=requested_type,
+                title={
+                    ChartType.PIE: "Répartition (camembert)",
+                    ChartType.DONUT: "Répartition (anneau)",
+                    ChartType.HORIZONTAL_BAR: "Comparaison par catégorie",
+                    ChartType.RADAR: "Comparaison radar",
+                }.get(requested_type, "Comparaison par catégorie"),
+                x_field=cat,
+                y_field=num,
+                reason="Type de graphique demandé explicitement par l'utilisateur.",
+                warnings=["Le résultat contient de nombreuses catégories ; appliquez un filtre ou demandez un Top N pour une lecture optimale."] if len(unique_cats) > 12 else []
+            )
         if len(unique_cats) <= 6:
             return ChartSpec(
                 chart_type=ChartType.PIE,
@@ -144,6 +182,16 @@ async def generate_chart_spec(request: ChartSpecRequest):
                 y_field=num,
                 reason="Comparaison de plusieurs catégories via un diagramme en barres."
             )
+
+    # 4. Two numerical measures -> scatter plot.
+    if requested_type == ChartType.SCATTER and len(numeric_cols) >= 2:
+        return ChartSpec(
+            chart_type=ChartType.SCATTER,
+            title="Nuage de points",
+            x_field=numeric_cols[0],
+            y_field=numeric_cols[1],
+            reason="Deux mesures numériques permettent un nuage de points."
+        )
 
     # Fallback to Table
     return ChartSpec(

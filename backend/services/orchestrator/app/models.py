@@ -21,6 +21,7 @@ class ConversationState(BaseModel):
     sql_query: Optional[str] = None
     results: Optional[list[dict[str, Any]]] = None
     chart_spec: Optional[dict[str, Any]] = None
+    response_text: Optional[str] = None
     
     # Clarification
     clarification_options: Optional[list[dict[str, str]]] = None

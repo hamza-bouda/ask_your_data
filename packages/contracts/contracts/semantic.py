@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class SemanticPlan(BaseModel):
     """A structured plan defining how to answer the user's analytical query."""
-    intent: str = Field(description="The classified intent, e.g., DATA_QUERY, CHART_GENERATION, UNRELATED, AMBIGUOUS.")
+    intent: str = Field(description="The classified intent, e.g., DATA_QUERY, CATALOG_QUERY, CHART_GENERATION, UNRELATED, AMBIGUOUS.")
     source_tables: List[str] = Field(
         default_factory=list,
         description="List of table names selected from the catalog to answer the query."
