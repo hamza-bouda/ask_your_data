@@ -18,6 +18,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
 from contracts.tenant import TenantContext
 
 try:
@@ -36,6 +38,12 @@ except ImportError:
 from fastapi.middleware.cors import CORSMiddleware
 
 app = create_service_app(service_name="gateway")
+
+# Observability setup
+setup_logging(service_name="gateway")
+setup_tracing(service_name="gateway", app=app)
+setup_metrics(app)
+
 app.add_middleware(CorrelationIdMiddleware)
 
 # Add CORS so frontend can call Gateway
@@ -275,13 +283,14 @@ async def send_message(
 
 # ── SSE Streaming ───────────────────────────────────────────────
 
-async def _orchestrator_event_stream(run_id: str, correlation_id: str) -> AsyncGenerator[str, None]:
+async def _orchestrator_event_stream(run_id: str, tenant_id: str, user_id: str, correlation_id: str) -> AsyncGenerator[str, None]:
     """Connect to the Orchestrator's internal event stream and yield SSE chunks."""
     try:
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "GET", 
                 f"{ORCHESTRATOR_URL}/internal/runs/{run_id}/events",
+                params={"tenant_id": tenant_id, "user_id": user_id},
                 headers={"X-Correlation-ID": correlation_id},
                 timeout=None
             ) as response:
@@ -309,7 +318,7 @@ async def stream_run_events(
     correlation_id = request.state.correlation_id
     
     return StreamingResponse(
-        _orchestrator_event_stream(run_id, correlation_id),
+        _orchestrator_event_stream(run_id, context.tenant_id, context.user_id, correlation_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -317,6 +326,30 @@ async def stream_run_events(
             "X-Accel-Buffering": "no" # Essential for Nginx to not buffer SSE
         }
     )
+
+@app.get("/v1/runs/{run_id}")
+async def get_run(
+    run_id: str,
+    request: Request,
+    context: TenantContext = Depends(get_tenant_context)
+):
+    """Get status and results of a run."""
+    correlation_id = request.state.correlation_id
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{ORCHESTRATOR_URL}/internal/runs/{run_id}",
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id},
+                headers={"X-Correlation-ID": correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail="Orchestrator service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Orchestrator error")
 
 
 # ── Admin Datasource Endpoints ─────────────────────────────────
@@ -451,3 +484,151 @@ async def get_metrics_proxy(source_id: str, request: Request, context: TenantCon
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+# --- Dashboards & Export Proxy ---
+
+@app.post("/v1/dashboards")
+async def create_dashboard(request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        body = await request.json()
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f'{ORCHESTRATOR_URL}/internal/dashboards',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id},
+                json=body,
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.get("/v1/dashboards")
+async def get_dashboards(request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f'{ORCHESTRATOR_URL}/internal/dashboards',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id},
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.get("/v1/dashboards/{dashboard_id}")
+async def get_dashboard(dashboard_id: str, request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        is_admin = str("admin" in context.roles or "manager" in context.roles).lower()
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.patch("/v1/dashboards/{dashboard_id}")
+async def update_dashboard(dashboard_id: str, request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        body = await request.json()
+        is_admin = str("admin" in context.roles or "manager" in context.roles).lower()
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                json=body,
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.delete("/v1/dashboards/{dashboard_id}")
+async def delete_dashboard(dashboard_id: str, request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        is_admin = str("admin" in context.roles or "manager" in context.roles).lower()
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.post("/v1/dashboards/{dashboard_id}/items")
+async def add_dashboard_item(dashboard_id: str, request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        body = await request.json()
+        is_admin = str("admin" in context.roles or "manager" in context.roles).lower()
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}/items',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                json=body,
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.delete("/v1/dashboards/{dashboard_id}/items/{item_id}")
+async def delete_dashboard_item(dashboard_id: str, item_id: str, request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        is_admin = str("admin" in context.roles or "manager" in context.roles).lower()
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}/items/{item_id}',
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                headers={'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.get("/v1/results/{message_id}/export")
+async def export_results(message_id: str, format: str, request: Request, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        ORCHESTRATOR_URL = 'http://orchestrator:8004'
+        
+        # We need to stream the response back
+        client = httpx.AsyncClient()
+        req = client.build_request(
+            "GET",
+            f'{ORCHESTRATOR_URL}/internal/results/{message_id}/export',
+            params={'format': format, 'tenant_id': context.tenant_id, 'user_id': context.user_id},
+            headers={'X-Correlation-ID': request.state.correlation_id}
+        )
+        resp = await client.send(req, stream=True)
+        resp.raise_for_status()
+        
+        return StreamingResponse(
+            resp.aiter_bytes(),
+            media_type=resp.headers.get("Content-Type", "text/csv"),
+            headers={"Content-Disposition": resp.headers.get("Content-Disposition", f"attachment; filename=export_{message_id}.csv")}
+        )
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)

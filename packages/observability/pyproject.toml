@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ask-your-data-observability"
+version = "0.1.0"
+description = "Shared observability configurations for Ask Your Data microservices"
+requires-python = ">=3.12"
+dependencies = [
+    "structlog>=24.1",
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-exporter-otlp>=1.24",
+    "prometheus-client>=0.20",
+    "prometheus-fastapi-instrumentator>=7.0",
+    "fastapi>=0.100",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["observability*"]

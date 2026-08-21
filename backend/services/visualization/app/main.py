@@ -10,6 +10,8 @@ from fastapi import Request
 from pydantic import BaseModel
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
 try:
     from contracts.chart import ChartSpec, ChartType
 except ImportError:
@@ -19,6 +21,12 @@ except ImportError:
     from contracts.chart import ChartSpec, ChartType
 
 app = create_service_app(service_name="visualization")
+
+# Observability setup
+setup_logging(service_name="visualization")
+setup_tracing(service_name="visualization", app=app)
+setup_metrics(app)
+
 
 
 class ChartSpecRequest(BaseModel):

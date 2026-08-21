@@ -1,0 +1,34 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+  - job_name: 'identity'
+    static_configs:
+      - targets: ['identity:8001']
+  - job_name: 'catalog'
+    static_configs:
+      - targets: ['catalog:8002']
+  - job_name: 'query-execution'
+    static_configs:
+      - targets: ['query-execution:8003']
+  - job_name: 'orchestrator'
+    static_configs:
+      - targets: ['orchestrator:8004']
+  - job_name: 'visualization'
+    static_configs:
+      - targets: ['visualization:8005']
+  - job_name: 'sql-generator'
+    static_configs:
+      - targets: ['sql-generator:8006']
+  - job_name: 'sql-executor'
+    static_configs:
+      - targets: ['sql-executor:8007']
+  - job_name: 'semantic-router'
+    static_configs:
+      - targets: ['semantic-router:8008']
+  - job_name: 'worker'
+    static_configs:
+      - targets: ['worker:8000']

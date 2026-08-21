@@ -1,16 +1,18 @@
-# React + Vite
+# Ask Your Data
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Ask Your Data is an enterprise-grade Conversational BI platform. It allows users to ask questions in natural language and receive accurate data insights, powered by LLMs and a secure deterministic SQL pipeline.
 
-Currently, two official plugins are available:
+## Features
+- **Conversational BI**: Natural language to SQL generation.
+- **Data Governance**: Column and row-level access control.
+- **Robust Observability**: End-to-end tracing, structured logging, and metrics.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Quick Start
 
-## React Compiler
+```bash
+docker compose -f infra/compose/docker-compose.yml up --build
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## Documentation
+- [Architecture Decision Records (ADRs)](./docs/adr)
+- [Observability Guide](./docs/observability.md)

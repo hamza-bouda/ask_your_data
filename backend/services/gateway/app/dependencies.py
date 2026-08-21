@@ -17,7 +17,8 @@ async def get_tenant_context(request: Request) -> TenantContext:
     Raises 401 if missing or invalid.
     """
     auth_header = request.headers.get("Authorization")
-    if not auth_header:
+    token_query = request.query_params.get("token")
+    if not auth_header and not token_query:
         # Development fallback: if no token provided, return a default context
         return TenantContext(
             tenant_id="acme", 
@@ -26,11 +27,17 @@ async def get_tenant_context(request: Request) -> TenantContext:
             permissions=["query", "view_catalog"]
         )
         
-    parts = auth_header.split(" ", 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Expected 'Bearer <token>' format")
-        
-    token = parts[1]
+    token = None
+    if auth_header:
+        parts = auth_header.split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Expected 'Bearer <token>' format")
+        token = parts[1]
+    elif token_query:
+        token = token_query
+    
+    if not token:
+        raise HTTPException(status_code=401, detail="Token validation failed")
     
     try:
         async with httpx.AsyncClient() as client:

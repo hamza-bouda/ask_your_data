@@ -39,6 +39,11 @@ export const getConversation = async (id) => {
   return response.data;
 };
 
+export const getRun = async (runId) => {
+  const response = await api.get(`/v1/runs/${runId}`);
+  return response.data;
+};
+
 export const sendMessage = async (conversationId, message) => {
   try {
     const response = await api.post(`/v1/conversations/${conversationId}/messages`, { message });

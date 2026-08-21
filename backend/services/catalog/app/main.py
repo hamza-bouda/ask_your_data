@@ -9,10 +9,18 @@ from sentence_transformers import SentenceTransformer
 from cryptography.fernet import Fernet
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
 from app.database import get_db, create_tables
 from app.models import TenantDatabase, TableSchema, ColumnSchema, AdminAudit, SemanticMetric, SemanticSynonym, CatalogDocument
 
 app = create_service_app(service_name="catalog")
+
+# Observability setup
+setup_logging(service_name="catalog")
+setup_tracing(service_name="catalog", app=app)
+setup_metrics(app)
+
 
 # Global embedding model (loaded on startup)
 embedder = None

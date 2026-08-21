@@ -4,3 +4,5 @@ pydantic>=2.7,<3
 PyJWT>=2.9,<3
 sqlalchemy>=2.0,<3
 psycopg2-binary>=2.9,<3
+
+-e ../../../packages/observability

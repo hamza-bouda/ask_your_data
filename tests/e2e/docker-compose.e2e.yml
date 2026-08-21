@@ -1,0 +1,12 @@
+# Minimal e2e compose stack overriding main
+# Could define mocks or specific env vars here
+include:
+  - ../../infra/compose/docker-compose.yml
+
+services:
+  sql-generator:
+    environment:
+      - LLM_PROVIDER=mock
+  semantic-router:
+    environment:
+      - LLM_PROVIDER=mock

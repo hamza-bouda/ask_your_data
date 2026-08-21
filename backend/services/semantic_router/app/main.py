@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from typing import Any, List, Optional
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
 
 try:
     from app.router import create_semantic_plan, SemanticPlanOut
@@ -18,6 +20,12 @@ except ImportError:
 
 
 app = create_service_app(service_name="semantic_router")
+
+# Observability setup
+setup_logging(service_name="semantic_router")
+setup_tracing(service_name="semantic_router", app=app)
+setup_metrics(app)
+
 
 
 # ── Request Models ───────────────────────────────────────────────

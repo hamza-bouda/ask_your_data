@@ -3,13 +3,22 @@
 Coordinates the end-to-step conversational BI pipeline using LangGraph.
 """
 
-from typing import Any, Optional, List
-from fastapi import HTTPException, Depends
+from typing import Any, Optional, List, AsyncGenerator
+from fastapi import HTTPException, Depends, BackgroundTasks, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uuid
 from datetime import datetime
+import asyncio
+import json
+import traceback
+
+from app.redis_client import get_redis_client, close_redis_client
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
+from contracts.events import RunEvent, RunEventType
 
 try:
     from app.models import ConversationState
@@ -26,9 +35,24 @@ from sqlalchemy.orm import Session
 
 app = create_service_app(service_name="orchestrator")
 
+# Observability setup
+setup_logging(service_name="orchestrator")
+setup_tracing(service_name="orchestrator", app=app)
+setup_metrics(app)
+
+try:
+    from app.dashboards import router as dashboards_router
+except ImportError:
+    from backend.services.orchestrator.app.dashboards import router as dashboards_router
+
+app.include_router(dashboards_router)
 @app.on_event("startup")
 def on_startup():
     create_tables()
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await close_redis_client()
 
 # ── Request/Response Models ──────────────────────────────────────
 
@@ -63,7 +87,9 @@ class ConversationDetailResponse(BaseModel):
 
 class RunResponse(BaseModel):
     run_id: str
+    conversation_id: str | None = None
     status: str
+    events_url: str | None = None
     results: Optional[list[dict[str, Any]]] = None
     chart_spec: Optional[dict[str, Any]] = None
     semantic_plan: Optional[dict[str, Any]] = None
@@ -71,6 +97,9 @@ class RunResponse(BaseModel):
     error_message: Optional[str] = None
     response: Optional[str] = None
     sql_draft: Optional[dict] = None
+
+
+# Global SSE Queues removed - using Redis Streams instead
 
 
 # ── Endpoints ────────────────────────────────────────────────────
@@ -114,8 +143,13 @@ async def get_conversation(conversation_id: str, tenant_id: str, user_id: str, d
     }
 
 @app.post("/internal/conversations/{conversation_id}/messages", response_model=RunResponse)
-async def send_message(conversation_id: str, body: SendMessageRequest, db: Session = Depends(get_db)):
-    """Send a message and run the orchestrator."""
+async def send_message(
+    conversation_id: str, 
+    body: SendMessageRequest, 
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Send a message and push a run task to Redis."""
     conv = db.query(Conversation).filter(
         Conversation.id == conversation_id,
         Conversation.tenant_id == body.tenant_id,
@@ -126,7 +160,6 @@ async def send_message(conversation_id: str, body: SendMessageRequest, db: Sessi
         
     # Auto-title on first message
     if len(conv.messages) == 0 and conv.title == "Nouvelle conversation":
-        # Keep it simple, just take the first 30 chars
         conv.title = (body.message[:30] + '...') if len(body.message) > 30 else body.message
         db.add(conv)
 
@@ -138,93 +171,163 @@ async def send_message(conversation_id: str, body: SendMessageRequest, db: Sessi
     )
     db.add(user_msg)
     
-    # Create Run
+    # Create Run with pending status
     run_id = str(uuid.uuid4())
     run = Run(
         id=run_id,
         conversation_id=conversation_id,
-        status="running"
+        tenant_id=body.tenant_id,
+        user_id=body.user_id,
+        status="pending",
+        stage="init"
     )
     db.add(run)
     db.commit()
 
-    # Load chat history
-    # Limit to last 10 messages for context
-    history_msgs = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(10).all()
-    chat_history = [{"role": m.role, "content": m.content} for m in reversed(history_msgs)]
-
-    initial_state = ConversationState(
-        tenant_id=body.tenant_id,
-        user_id=body.user_id,
-        conversation_id=conversation_id,
-        question=body.message,
-        run_id=run_id,
-        chat_history=chat_history
-    )
+    correlation_id = request.headers.get("X-Correlation-ID", "")
     
-    try:
-        final_state_dict = orchestrator_graph.invoke(initial_state.model_dump())
-        final_state = ConversationState(**final_state_dict)
-    except Exception as exc:
-        run.status = "error"
-        run.error_message = str(exc)
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Orchestrator failed: {str(exc)}")
-        
-    run.status = final_state.status
-    run.error_message = final_state.error_message
-    
-    # Save assistant message
-    has_error = final_state.error_message is not None
-    response_text = final_state.error_message if has_error else "Voici les résultats"
-    
-    # If the semantic router returned a direct response (e.g., unrelated greeting)
-    if final_state.status == "unrelated" and final_state.results and len(final_state.results) > 0 and "response" in final_state.results[0]:
-        response_text = final_state.results[0]["response"]
-    elif final_state.status == "needs_clarification":
-        response_text = "Je n'ai pas bien compris. Pouvez-vous préciser ?"
-        
-    payload = {
-        "semantic_plan": final_state.semantic_plan,
-        "results": final_state.results,
-        "chart_spec": final_state.chart_spec,
-        "sql_query": final_state.sql_query,
-        "clarification_options": final_state.clarification_options,
-        "error_message": final_state.error_message
+    # Push to Redis Stream
+    redis_client = get_redis_client()
+    task_payload = {
+        "run_id": run_id,
+        "tenant_id": body.tenant_id,
+        "user_id": body.user_id,
+        "conversation_id": conversation_id,
+        "correlation_id": correlation_id,
+        "question": body.message
     }
     
-    ai_msg = Message(
-        conversation_id=conversation_id,
-        role="assistant",
-        content=response_text,
-        payload=payload
-    )
-    db.add(ai_msg)
-    db.commit()
+    # Inject tracing context
+    from observability import inject_context
+    task_payload.update(inject_context())
+    
+    await redis_client.xadd("stream:tasks:runs", task_payload)
     
     return RunResponse(
         run_id=run_id,
-        status=final_state.status,
-        results=final_state.results,
-        chart_spec=final_state.chart_spec,
-        semantic_plan=final_state.semantic_plan,
-        clarification_options=final_state.clarification_options,
-        error_message=final_state.error_message,
-        response=response_text,
-        sql_draft={"sql_query": final_state.sql_query} if final_state.sql_query else None
+        conversation_id=conversation_id,
+        status="pending",
+        events_url=f"/v1/runs/{run_id}/events"
     )
 
-# ── Old Run Endpoints for SSE Support (if still needed) ───────────
+# ── SSE Endpoints ───────────────────────────────────────────────
 
-@app.get("/internal/runs/{run_id}", response_model=RunResponse)
-async def get_run_status(run_id: str, db: Session = Depends(get_db)):
-    """Retrieve the status and results of a run."""
+@app.get("/internal/runs/{run_id}/events")
+async def get_run_events(run_id: str, tenant_id: str, user_id: str, request: Request, last_event_id: str | None = None, db: Session = Depends(get_db)):
+    """Stream events for a specific run from Redis."""
     run = db.query(Run).filter(Run.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
         
-    return RunResponse(
+    if run.tenant_id != tenant_id or run.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # The client can pass Last-Event-ID as a header, but also via query params (useful for EventSource if we had to polyfill)
+    client_last_event_id = request.headers.get("Last-Event-ID") or last_event_id or "0-0"
+    redis_client = get_redis_client()
+    stream_key = f"stream:events:{run_id}"
+
+    async def event_generator():
+        current_id = client_last_event_id
+        
+        # Check if the run is already completed before we even start pulling,
+        # but we should still replay events if the client hasn't seen them.
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                    
+                # Read from Redis stream (block for 5 seconds to wait for new events)
+                streams = {stream_key: current_id}
+                result = await redis_client.xread(streams, count=10, block=5000)
+                
+                if result:
+                    for _, messages in result:
+                        for message_id, message_data in messages:
+                            current_id = message_id
+                            event_json = message_data.get("event")
+                            if event_json:
+                                yield f"id: {message_id}\ndata: {event_json}\n\n"
+                                
+                                # If this was a terminal event, we can stop the stream
+                                event_dict = json.loads(event_json)
+                                if event_dict.get("event_type") in [RunEventType.RESULT_READY, RunEventType.RUN_FAILED]:
+                                    return
+                                    
+                # Send keep-alive comments to prevent connection drop
+                yield ": keep-alive\n\n"
+                
+                # If run is marked as finished in DB and no more events, we close
+                # This protects against cases where the terminal event was lost or missed
+                db.expire_all()
+                current_run = db.query(Run).filter(Run.id == run_id).first()
+                if current_run and current_run.status in ["completed", "error"]:
+                    # Wait a bit just in case events are still being flushed
+                    await asyncio.sleep(2)
+                    final_result = await redis_client.xread({stream_key: current_id}, count=10, block=10)
+                    if not final_result:
+                        yield f"id: {current_id}\ndata: {json.dumps({'event_type': RunEventType.RESULT_READY if current_run.status == 'completed' else RunEventType.RUN_FAILED, 'status': current_run.status, 'run_id': run_id})}\n\n"
+                        return
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            traceback.print_exc()
+            yield f"data: {json.dumps({'event_type': 'error', 'detail': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@app.get("/internal/runs/{run_id}", response_model=RunResponse)
+async def get_run_status(run_id: str, tenant_id: str, user_id: str, db: Session = Depends(get_db)):
+    """Retrieve the status and results of a run."""
+    run = db.query(Run).filter(Run.id == run_id, Run.tenant_id == tenant_id, Run.user_id == user_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+        
+    response_data = RunResponse(
         run_id=run_id,
+        conversation_id=run.conversation_id,
         status=run.status,
         error_message=run.error_message
     )
+    
+    # If final message exists, populate payload
+    if run.final_message_id:
+        msg = db.query(Message).filter(Message.id == run.final_message_id).first()
+        if msg and msg.payload:
+            response_data.results = msg.payload.get("results")
+            response_data.chart_spec = msg.payload.get("chart_spec")
+            response_data.semantic_plan = msg.payload.get("semantic_plan")
+            response_data.clarification_options = msg.payload.get("clarification_options")
+            response_data.sql_draft = {"sql_query": msg.payload.get("sql_query")} if msg.payload.get("sql_query") else None
+            response_data.response = msg.content
+            
+    return response_data
+
+@app.get("/internal/runs/dlq")
+async def get_dlq_runs(request: Request):
+    """Admin endpoint to view DLQ."""
+    # Requires an admin token check ideally, skipping for local MVP
+    redis_client = get_redis_client()
+    dlq_items = await redis_client.xrange("stream:dlq:runs", "-", "+", count=100)
+    
+    results = []
+    for message_id, message_data in dlq_items:
+        results.append({
+            "message_id": message_id,
+            "data": message_data
+        })
+    return {"dlq": results}
+
+@app.get("/internal/runs/stuck")
+async def get_stuck_runs(db: Session = Depends(get_db)):
+    """Admin endpoint to see runs stuck in pending or running state."""
+    # Check for runs stuck for more than 5 minutes
+    now = datetime.now(timezone.utc)
+    from sqlalchemy import func
+    # Note: For SQLite/Postgres differences, standard filtering:
+    # MVP approach: return runs still pending or running
+    stuck = db.query(Run).filter(Run.status.in_(["pending", "running"])).all()
+    
+    return {"stuck_runs": [{"id": r.id, "status": r.status, "attempts": r.attempts, "created_at": r.created_at} for r in stuck]}
+

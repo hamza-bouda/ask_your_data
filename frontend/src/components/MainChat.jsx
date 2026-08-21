@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import MessageBubble from './MessageBubble';
 import ChartRenderer from './ChartRenderer';
 import DebugPanel from './DebugPanel';
-import { getConversations, createConversation, getConversation, sendMessage } from '../services/api';
+import { getConversations, createConversation, getConversation, sendMessage, getRun } from '../services/api';
 import '../App.css';
 
 export default function MainChat() {
@@ -115,39 +115,93 @@ export default function MainChat() {
 
       const response = await sendMessage(currentConvId, userMessage);
       
-      const payload = {
-        semantic_plan: response.semantic_plan,
-        results: response.results,
-        chart_spec: response.chart_spec,
-        sql_query: response.sql_draft?.sql_query || response.sql_query,
-        error_message: response.error_message,
-        clarification_options: response.clarification_options
+      const token = localStorage.getItem('token');
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const eventSourceUrl = `${API_URL}${response.events_url}?token=${token}`;
+      
+      const eventSource = new EventSource(eventSourceUrl);
+      
+      const finishRun = async () => {
+          setIsLoading(false);
+          eventSource.close();
+          try {
+              const finalRun = await getRun(response.run_id);
+              const payload = {
+                semantic_plan: finalRun.semantic_plan,
+                results: finalRun.results,
+                chart_spec: finalRun.chart_spec,
+                sql_query: finalRun.sql_draft?.sql_query || finalRun.sql_query,
+                error_message: finalRun.error_message,
+                clarification_options: finalRun.clarification_options
+              };
+              
+              const aiMessage = {
+                id: finalRun.final_message_id,
+                role: 'assistant',
+                content: finalRun.response || "Voici les résultats de votre requête.",
+                payload: payload
+              };
+
+              setMessages(prev => [...prev.filter(m => m.id !== 'temp-loading'), aiMessage]);
+
+              setDebugData({
+                plan: payload.semantic_plan,
+                sql: payload.sql_query,
+                error: payload.error_message !== null
+              });
+          } catch (fetchErr) {
+              setMessages(prev => [...prev.filter(m => m.id !== 'temp-loading'), { role: 'assistant', content: "Désolé, une erreur s'est produite lors de la récupération des résultats." }]);
+          }
       };
       
-      const aiMessage = {
-        role: 'assistant',
-        content: response.response || "Voici les résultats de votre requête.",
-        payload: payload
+      eventSource.onmessage = async (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            if (data.event_type === 'run_completed' || data.event_type === 'result_ready' || data.event_type === 'run_failed') {
+                await finishRun();
+            } else {
+                let statusText = "En cours d'analyse...";
+                if (data.status === 'pending') statusText = "En attente du traitement...";
+                if (data.event_type === 'run_started') statusText = "Démarrage du traitement...";
+                if (data.event_type === 'retrieval_completed') statusText = "Recherche du schéma de données...";
+                if (data.event_type === 'planning') statusText = "Planification sémantique...";
+                if (data.event_type === 'sql_generating') statusText = "Préparation de la requête...";
+                if (data.event_type === 'query_executing') statusText = "Exécution de la requête...";
+                if (data.event_type === 'visualization_generating') statusText = "Préparation de la visualisation...";
+                if (data.event_type === 'clarification_requested') statusText = "Une clarification est requise...";
+                
+                setMessages(prev => {
+                   const newMsgs = [...prev];
+                   const last = newMsgs[newMsgs.length - 1];
+                   if (last && last.id === 'temp-loading') {
+                       last.content = statusText;
+                   } else {
+                       newMsgs.push({ id: 'temp-loading', role: 'assistant', content: statusText, isTimeline: true });
+                   }
+                   return newMsgs;
+                });
+            }
+        } catch (err) {
+            console.error("SSE parse error", err);
+        }
       };
-
-      setMessages(prev => [...prev, aiMessage]);
-
-      setDebugData({
-        plan: payload.semantic_plan,
-        sql: payload.sql_query,
-        error: payload.error_message !== null
-      });
+      
+      eventSource.onerror = async (err) => {
+          console.error("SSE error, falling back to polling", err);
+          eventSource.close();
+          await finishRun();
+      };
 
     } catch (error) {
       if (error.response?.status === 401) {
         handleLogout();
         return;
       }
-      setMessages(prev => [...prev, { 
+      setMessages(prev => [...prev.filter(m => m.id !== 'temp-loading'), { 
         role: 'assistant', 
         content: "Désolé, une erreur s'est produite." 
       }]);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -191,7 +245,16 @@ export default function MainChat() {
         <div className="chat-history">
           {messages.map((msg, idx) => (
             <div key={idx}>
-              <MessageBubble role={msg.role === 'assistant' ? 'ai' : msg.role} content={msg.content} />
+              {msg.isTimeline ? (
+                <div style={{ padding: '0.5rem 1rem', color: '#64748b', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div className="typing-dot" style={{ animationDelay: '0s', width: 4, height: 4 }}></div>
+                    <div className="typing-dot" style={{ animationDelay: '0.2s', width: 4, height: 4 }}></div>
+                    <div className="typing-dot" style={{ animationDelay: '0.4s', width: 4, height: 4 }}></div>
+                    {msg.content}
+                </div>
+              ) : (
+                <MessageBubble role={msg.role === 'assistant' ? 'ai' : msg.role} content={msg.content} />
+              )}
               
                             {msg.payload?.semantic_plan && msg.payload.semantic_plan.intent !== 'UNRELATED' && msg.payload.semantic_plan.intent !== 'AMBIGUOUS' && (
                 <div style={{ maxWidth: '85%', alignSelf: 'flex-start', marginTop: '8px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
@@ -215,6 +278,57 @@ export default function MainChat() {
                     data={msg.payload.results} 
                     chartSpec={msg.payload.chart_spec}
                   />
+                  {msg.id && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', fontSize: '12px' }}>
+                      <button 
+                        onClick={() => {
+                          const url = `/api/v1/results/${msg.id}/export?format=csv`;
+                          fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+                            .then(res => {
+                              if (!res.ok) throw new Error('Export denied');
+                              return res.blob();
+                            })
+                            .then(blob => {
+                              const link = document.createElement('a');
+                              link.href = window.URL.createObjectURL(blob);
+                              link.download = `export_${msg.id}.csv`;
+                              link.click();
+                            })
+                            .catch(e => alert(e.message));
+                        }}
+                        style={{ padding: '4px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', color: '#1e293b' }}
+                      >
+                        Exporter CSV
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          const name = prompt("Enter dashboard ID to save to:");
+                          if (name) {
+                            try {
+                                await fetch(`/api/v1/dashboards/${name}/items`, {
+                                    method: 'POST',
+                                    headers: { 
+                                        'Content-Type': 'application/json',
+                                        Authorization: `Bearer ${localStorage.getItem('token')}` 
+                                    },
+                                    body: JSON.stringify({
+                                        source_message_id: msg.id,
+                                        title: msg.payload.chart_spec?.title || "Result",
+                                        order: 0
+                                    })
+                                });
+                                alert("Saved to dashboard!");
+                            } catch (e) {
+                                alert("Error saving");
+                            }
+                          }
+                        }}
+                        style={{ padding: '4px 8px', background: '#e2e8f0', border: 'none', borderRadius: '4px', cursor: 'pointer', color: '#1e293b' }}
+                      >
+                        Sauvegarder
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               

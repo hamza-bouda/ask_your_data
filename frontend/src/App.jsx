@@ -10,6 +10,8 @@ import ResultsPage from './pages/ResultsPage';
 import DataSourcesPage from './pages/DataSourcesPage';
 import AdminDataPage from './pages/AdminDataPage';
 import ProfilePage from './pages/ProfilePage';
+import DashboardsPage from './pages/DashboardsPage';
+import DashboardDetailPage from './pages/DashboardDetailPage';
 
 import './App.css';
 
@@ -29,6 +31,8 @@ function App() {
           <Route path="chat" element={<ConversationsPage />} />
           <Route path="explorer" element={<DataExplorerPage />} />
           <Route path="results" element={<ResultsPage />} />
+          <Route path="dashboards" element={<DashboardsPage />} />
+          <Route path="dashboards/:id" element={<DashboardDetailPage />} />
           <Route path="admin/data" element={<AdminDataPage />} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>

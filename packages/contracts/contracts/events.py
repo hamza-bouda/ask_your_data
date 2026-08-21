@@ -15,36 +15,43 @@ from pydantic import BaseModel, Field
 class RunEventType(StrEnum):
     """Exhaustive set of event types emitted by the Orchestrator."""
 
-    RUN_STARTED = "run.started"
-    CLASSIFYING = "run.classifying"
-    CLARIFICATION_REQUESTED = "run.clarification_requested"
-    RETRIEVING = "run.retrieving"
-    PLANNING = "run.planning"
-    SQL_GENERATED = "run.sql_generated"
-    SQL_VALIDATED = "run.sql_validated"
-    SQL_REJECTED = "run.sql_rejected"
-    EXECUTING = "run.executing"
-    REPAIRING = "run.repairing"
-    RESULT_READY = "run.result_ready"
-    RUN_FAILED = "run.failed"
-    RUN_COMPLETED = "run.completed"
+    RUN_STARTED = "run_started"
+    CLASSIFYING = "classifying"
+    RETRIEVAL_STARTED = "retrieval_started"
+    RETRIEVAL_COMPLETED = "retrieval_completed"
+    CLARIFICATION_REQUESTED = "clarification_requested"
+    PLANNING = "planning"
+    SQL_GENERATING = "sql_generating"
+    SQL_VALIDATING = "sql_validating"
+    QUERY_EXECUTING = "query_executing"
+    VISUALIZATION_GENERATING = "visualization_generating"
+    RESULT_READY = "result_ready"
+    RUN_FAILED = "run_failed"
+    RUN_COMPLETED = "run_completed"
 
 
 class RunEvent(BaseModel):
-    """A single lifecycle event within a pipeline run.
+    """A single lifecycle event within a pipeline run."""
 
-    Streamed to the browser via SSE through the Gateway.  The payload
-    is intentionally ``dict[str, Any]`` so each event type can carry
-    its own domain-specific data without inflating the base contract.
-    """
-
-    event_id: UUID = Field(
-        default_factory=uuid4,
+    event_id: str = Field(
+        default_factory=lambda: str(uuid4()),
         description="Unique event identifier.",
     )
-    run_id: UUID = Field(
+    run_id: str = Field(
         ...,
         description="Pipeline run this event belongs to.",
+    )
+    conversation_id: str = Field(
+        ...,
+        description="Conversation this run belongs to.",
+    )
+    status: str = Field(
+        ...,
+        description="Current status of the run (e.g. running, failed, completed).",
+    )
+    stage: str = Field(
+        ...,
+        description="Current stage of the run pipeline.",
     )
     event_type: RunEventType = Field(
         ...,
@@ -52,11 +59,11 @@ class RunEvent(BaseModel):
     )
     payload: dict[str, Any] = Field(
         default_factory=dict,
-        description="Event-specific data.",
+        description="Event-specific data, guaranteed to be bounded and without sensitive chain-of-thought.",
     )
-    trace_id: str = Field(
-        default="",
-        description="OpenTelemetry trace ID for correlation.",
+    correlation_id: str | None = Field(
+        default=None,
+        description="Correlation ID for tracing.",
     )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

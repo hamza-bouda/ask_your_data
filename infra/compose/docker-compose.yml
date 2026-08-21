@@ -138,6 +138,19 @@ services:
     networks:
       - ayd
 
+  worker:
+    build:
+      context: ../../
+      dockerfile: backend/services/orchestrator/Dockerfile
+    command: python -m app.worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ayd
+
   semantic-router:
     build:
       context: ../../
@@ -180,6 +193,35 @@ services:
       - "80:80"
     depends_on:
       - gateway
+    networks:
+      - ayd
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    volumes:
+      - ./prometheus:/etc/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - ayd
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - ayd
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.59
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
     networks:
       - ayd
 

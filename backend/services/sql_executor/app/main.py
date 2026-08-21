@@ -9,6 +9,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
 
 try:
     from app.executor import execute_query, SqlExecutionError
@@ -17,6 +19,12 @@ except ImportError:
 
 
 app = create_service_app(service_name="sql_executor")
+
+# Observability setup
+setup_logging(service_name="sql_executor")
+setup_tracing(service_name="sql_executor", app=app)
+setup_metrics(app)
+
 
 # ── Request/Response Models ──────────────────────────────────────
 

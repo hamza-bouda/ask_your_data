@@ -16,6 +16,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from contracts.service_factory import create_service_app
+from observability import setup_logging, setup_tracing, setup_metrics
+
 from contracts.tenant import TenantContext
 
 try:
@@ -29,6 +31,12 @@ except ImportError:
 
 
 app = create_service_app(service_name="identity")
+
+# Observability setup
+setup_logging(service_name="identity")
+setup_tracing(service_name="identity", app=app)
+setup_metrics(app)
+
 
 
 # Create tables on startup
