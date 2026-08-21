@@ -79,9 +79,15 @@ def test_create_conversation_invalid_token(mock_check_rate_limit):
 @patch("backend.services.gateway.app.dependencies.httpx.AsyncClient", new=MockAsyncClient)
 @patch("backend.services.gateway.app.main.check_rate_limit", new_callable=AsyncMock)
 def test_create_conversation_missing_token(mock_check_rate_limit):
-    """Missing token uses dev fallback and returns 200."""
+    """Every protected endpoint rejects missing authentication."""
     response = client.post("/v1/conversations", json={"title": "Test Chat"})
-    assert response.status_code == 200
+    assert response.status_code == 401
+
+
+def test_token_query_is_rejected_by_default():
+    """Bearer tokens must not silently be accepted from arbitrary query URLs."""
+    response = client.get("/v1/conversations?token=valid_token")
+    assert response.status_code == 401
 
 
 # ── 2. Rate Limiting Tests ──────────────────────────────────────

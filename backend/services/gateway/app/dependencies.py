@@ -3,9 +3,9 @@ from fastapi import Request, HTTPException, Depends
 import httpx
 
 try:
-    from app.config import IDENTITY_URL
+    from app.config import IDENTITY_URL, ALLOW_SSE_TOKEN_QUERY
 except ImportError:
-    from backend.services.gateway.app.config import IDENTITY_URL
+    from backend.services.gateway.app.config import IDENTITY_URL, ALLOW_SSE_TOKEN_QUERY
 
 from contracts.tenant import TenantContext
 
@@ -19,13 +19,7 @@ async def get_tenant_context(request: Request) -> TenantContext:
     auth_header = request.headers.get("Authorization")
     token_query = request.query_params.get("token")
     if not auth_header and not token_query:
-        # Development fallback: if no token provided, return a default context
-        return TenantContext(
-            tenant_id="acme", 
-            user_id="hamza", 
-            roles=["analyst", "admin"], # Added admin for dev fallback to test
-            permissions=["query", "view_catalog"]
-        )
+        raise HTTPException(status_code=401, detail="Authentication required")
         
     token = None
     if auth_header:
@@ -33,8 +27,10 @@ async def get_tenant_context(request: Request) -> TenantContext:
         if len(parts) != 2 or parts[0].lower() != "bearer":
             raise HTTPException(status_code=401, detail="Expected 'Bearer <token>' format")
         token = parts[1]
-    elif token_query:
+    elif token_query and ALLOW_SSE_TOKEN_QUERY and request.url.path.endswith("/events"):
         token = token_query
+    elif token_query:
+        raise HTTPException(status_code=401, detail="Bearer token required")
     
     if not token:
         raise HTTPException(status_code=401, detail="Token validation failed")
