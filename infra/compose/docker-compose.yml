@@ -88,6 +88,13 @@ services:
       - ../../.env
     environment:
       APP_ENV: development
+      # Keep the embedding model between container recreations. Without this
+      # cache, the catalog remains unavailable while it downloads the model on
+      # every local restart.
+      HF_HOME: /root/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /root/.cache/sentence_transformers
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -231,6 +238,11 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:1.59
+    # Jaeger 1.59 binds OTLP receivers to localhost by default. Application
+    # containers use the Docker network, so bind explicitly to all interfaces.
+    command:
+      - --collector.otlp.grpc.host-port=0.0.0.0:4317
+      - --collector.otlp.http.host-port=0.0.0.0:4318
     ports:
       - "16686:16686"
       - "4317:4317"
@@ -240,6 +252,7 @@ services:
 
 volumes:
   pgdata:
+  hf_cache:
 
 networks:
   ayd:
