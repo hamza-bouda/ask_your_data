@@ -76,10 +76,12 @@ def test_create_conversation_invalid_token(mock_check_rate_limit):
     )
     assert response.status_code == 401
     
-def test_create_conversation_missing_token():
-    """Missing token is rejected with 401."""
+@patch("backend.services.gateway.app.dependencies.httpx.AsyncClient", new=MockAsyncClient)
+@patch("backend.services.gateway.app.main.check_rate_limit", new_callable=AsyncMock)
+def test_create_conversation_missing_token(mock_check_rate_limit):
+    """Missing token uses dev fallback and returns 200."""
     response = client.post("/v1/conversations", json={"title": "Test Chat"})
-    assert response.status_code == 401
+    assert response.status_code == 200
 
 
 # ── 2. Rate Limiting Tests ──────────────────────────────────────

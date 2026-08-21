@@ -20,3 +20,6 @@ __all__ = [
     "ChartType",
     "ApiError",
 ]
+
+from .semantic import SemanticPlan
+__all__.append(" SemanticPlan\)

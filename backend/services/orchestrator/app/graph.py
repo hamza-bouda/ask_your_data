@@ -9,48 +9,77 @@ except ImportError:
     from backend.services.orchestrator.app.models import ConversationState
 
 # Internal service URLs (would be configurable via env vars in a real setup)
-SQL_GENERATOR_URL = "http://localhost:8003"
-SQL_EXECUTOR_URL = "http://localhost:8004"
+SQL_GENERATOR_URL = "http://sql-generator:8006"
+SQL_EXECUTOR_URL = "http://sql-executor:8007"
+SEMANTIC_ROUTER_URL = "http://semantic-router:8008"
+VISUALIZATION_URL = "http://visualization:8009"
 
 # ── Node Functions ───────────────────────────────────────────────
 
-def classify_node(state: ConversationState) -> dict:
-    """Classifies the user query to check if it's ambiguous."""
-    # Mock behavior: if question contains "clarify", we trigger clarification
-    if "clarify" in state.question.lower():
-        return {
-            "status": "needs_clarification",
-            "clarification_options": [
-                {"id": "1", "text": "Do you mean Revenue from Subscriptions?"},
-                {"id": "2", "text": "Do you mean Revenue from Ads?"}
-            ]
-        }
-    return {"status": "classified"}
+
+
 
 def retrieve_node(state: ConversationState) -> dict:
     """Retrieves allowed schema context from the Catalog service."""
-    # Mock retrieval
-    return {
-        "status": "retrieved",
-        "context": {"tables": ["users", "sales"]}
-    }
+    try:
+        response = httpx.post(f"{SEMANTIC_ROUTER_URL}/internal/catalog/search", json={
+            "query": state.question,
+            "tenant_id": state.tenant_id
+        }, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        
+        return {
+            "status": "retrieved",
+            "context": {"documents": data.get("results", [])}
+        }
+    except Exception as e:
+        print(f"Error retrieving schema: {e}")
+        return {
+            "status": "retrieved",
+            "context": {"documents": []}
+        }
 
 def plan_node(state: ConversationState) -> dict:
     """Creates a semantic plan for the query."""
-    # Mock planning
-    return {
-        "status": "planned",
-        "semantic_plan": {"metric": "count", "dimension": "users"}
-    }
-
+    try:
+        response = httpx.post(f"{SEMANTIC_ROUTER_URL}/internal/plan", json={
+            "query": state.question,
+            "chat_history": state.chat_history,
+            "context": state.context
+        }, timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        
+        intent = data.get("intent")
+        if intent == "AMBIGUOUS":
+            return {
+                "status": "needs_clarification",
+                "clarification_options": [{"id": str(i), "text": opt} for i, opt in enumerate(data.get("clarification_options", []))]
+            }
+        
+        if intent == "UNRELATED":
+            return {
+                "status": "unrelated",
+                "semantic_plan": data,
+                "results": [{"response": "Bonjour ! Je suis AskYourData, votre assistant BI. Posez-moi une question sur vos données !"}]
+            }
+            
+        return {
+            "status": "planned",
+            "semantic_plan": data
+        }
+    except Exception as e:
+        print(f"Error planning: {e}")
+        return {"status": "planned", "semantic_plan": {"intent": "DATA_QUERY"}}
 def generate_sql_node(state: ConversationState) -> dict:
     """Calls the SQL Generator service."""
     try:
-        # We use a synchronous httpx call for simplicity in nodes, 
-        # though async nodes are fully supported by LangGraph.
         response = httpx.post(f"{SQL_GENERATOR_URL}/internal/generate-sql", json={
-            "question": state.question,
-            "schema_context": state.context if state.context else {}
+            "query": state.question,
+            "semantic_plan": state.semantic_plan if state.semantic_plan else {},
+            "schema_definition": state.context if state.context else {},
+            "chat_history": state.chat_history
         }, timeout=10.0)
         
         response.raise_for_status()
@@ -80,22 +109,63 @@ def execute_sql_node(state: ConversationState) -> dict:
         # If execution fails (e.g. safety check), trigger repair
         if response.status_code == 400:
             error_data = response.json()
+            error_msg = error_data.get("detail", "Unknown execution error")
+            
+            # Policy or strict safety errors shouldn't be blindly retried
+            if "policy" in error_msg.lower() or "denied" in error_msg.lower() or "forbidden" in error_msg.lower():
+                return {
+                    "status": "error",
+                    "error_message": f"La requête a été bloquée par les règles de sécurité : {error_msg}"
+                }
+                
             return {
                 "status": "sql_error",
-                "error_message": error_data.get("detail", "Unknown execution error")
-            }
-            
+                "error_message": error_msg
+            }            
         response.raise_for_status()
         data = response.json()
         
         return {
             "status": "executed",
-            "results": data.get("results", [])
+            "results": data.get("results", []),
+            "error_message": None
         }
     except Exception as e:
         return {
             "status": "error",
             "error_message": f"SQL Execution failed: {str(e)}"
+        }
+
+def visualization_node(state: ConversationState) -> dict:
+    """Calls the Visualization service to get a deterministic chart spec."""
+    if not state.results:
+        return {"status": "visualized"}
+        
+    try:
+        response = httpx.post(f"{VISUALIZATION_URL}/internal/chart-spec", json={
+            "results": state.results,
+            "semantic_plan": state.semantic_plan,
+            "question": state.question
+        }, timeout=5.0)
+        
+        response.raise_for_status()
+        chart_spec = response.json()
+        
+        return {
+            "status": "visualized",
+            "chart_spec": chart_spec
+        }
+    except Exception as e:
+        # Fallback to table if visualization service fails
+        print(f"Visualization service failed: {e}")
+        return {
+            "status": "visualized",
+            "chart_spec": {
+                "chart_type": "table",
+                "title": "Résultats tabulaires (Fallback)",
+                "reason": "Le service de visualisation est indisponible.",
+                "warnings": ["Erreur lors de la génération du graphique."]
+            }
         }
 
 def repair_node(state: ConversationState) -> dict:
@@ -115,17 +185,19 @@ def repair_node(state: ConversationState) -> dict:
 
 # ── Graph Edges ──────────────────────────────────────────────────
 
-def after_classify(state: ConversationState) -> str:
+def after_plan(state: ConversationState) -> str:
     if state.status == "needs_clarification":
-        return "end" # Pause or return clarification options
-    return "retrieve"
+        return "end"
+    if state.status == "unrelated":
+        return "end"
+    return "generate_sql"
 
 def after_execute(state: ConversationState) -> str:
     if state.status == "sql_error":
         return "repair"
     elif state.status == "error":
         return "end"
-    return "end"
+    return "visualization"
 
 def after_repair(state: ConversationState) -> str:
     if state.status == "error":
@@ -143,20 +215,24 @@ builder.add_node("plan", plan_node)
 builder.add_node("generate_sql", generate_sql_node)
 builder.add_node("execute_sql", execute_sql_node)
 builder.add_node("repair", repair_node)
+builder.add_node("visualization", visualization_node)
 
-builder.add_edge(START, "classify")
-builder.add_conditional_edges("classify", after_classify, {
-    "end": END,
-    "retrieve": "retrieve"
-})
+builder.add_edge(START, "retrieve")
+
 builder.add_edge("retrieve", "plan")
-builder.add_edge("plan", "generate_sql")
+builder.add_conditional_edges("plan", after_plan, {
+    "end": END,
+    "generate_sql": "generate_sql"
+})
 builder.add_edge("generate_sql", "execute_sql")
 
 builder.add_conditional_edges("execute_sql", after_execute, {
     "repair": "repair",
+    "visualization": "visualization",
     "end": END
 })
+
+builder.add_edge("visualization", END)
 
 builder.add_conditional_edges("repair", after_repair, {
     "end": END,

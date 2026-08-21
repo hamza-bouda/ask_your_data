@@ -9,14 +9,18 @@ class ConversationState(BaseModel):
     
     # Input
     tenant_id: str
+    user_id: str
+    conversation_id: str
     question: str
     run_id: str
+    chat_history: Optional[list[dict[str, Any]]] = None
     
     # Pipeline data
     context: Optional[dict[str, Any]] = None
     semantic_plan: Optional[dict[str, Any]] = None
     sql_query: Optional[str] = None
     results: Optional[list[dict[str, Any]]] = None
+    chart_spec: Optional[dict[str, Any]] = None
     
     # Clarification
     clarification_options: Optional[list[dict[str, str]]] = None

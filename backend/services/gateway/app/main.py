@@ -22,20 +22,30 @@ from contracts.tenant import TenantContext
 
 try:
     from app.config import ORCHESTRATOR_URL
-    from app.dependencies import get_tenant_context
+    from app.dependencies import get_tenant_context, require_admin
     from app.rate_limit import init_redis, close_redis, check_rate_limit
     from app.middleware import CorrelationIdMiddleware
 except ImportError:
     from backend.services.gateway.app.config import ORCHESTRATOR_URL
-    from backend.services.gateway.app.dependencies import get_tenant_context
+    from backend.services.gateway.app.dependencies import get_tenant_context, require_admin
     from backend.services.gateway.app.rate_limit import init_redis, close_redis, check_rate_limit
     from backend.services.gateway.app.middleware import CorrelationIdMiddleware
 
 
 # ── Create App & Add Middleware ─────────────────────────────────
+from fastapi.middleware.cors import CORSMiddleware
 
 app = create_service_app(service_name="gateway")
 app.add_middleware(CorrelationIdMiddleware)
+
+# Add CORS so frontend can call Gateway
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allow all origins for dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def startup():
@@ -45,8 +55,152 @@ async def startup():
 async def shutdown():
     await close_redis()
 
-
 # ── Request/Response Models ─────────────────────────────────────
+class ChatRequest(BaseModel):
+    message: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/v1/auth/login")
+async def login_proxy(body: LoginRequest):
+    """Proxy login request to identity service."""
+    try:
+        from app.config import IDENTITY_URL
+    except ImportError:
+        from backend.services.gateway.app.config import IDENTITY_URL
+        
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{IDENTITY_URL}/v1/auth/login",
+                json={"username": body.username, "password": body.password},
+                timeout=5.0
+            )
+            if resp.status_code == 401:
+                raise HTTPException(status_code=401, detail="Invalid username or password")
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Identity service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Identity error")
+
+
+class RegisterRequest(BaseModel):
+    connection_string: str
+
+@app.post("/api/v1/catalog/register")
+async def register_proxy(body: RegisterRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    """Proxy catalog register request to catalog service."""
+    try:
+        CATALOG_URL = "http://catalog:8002"
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{CATALOG_URL}/api/v1/catalog/register",
+                json={"connection_string": body.connection_string},
+                headers={"X-Tenant-Id": context.tenant_id, "X-User-Id": context.user_id, "X-Correlation-ID": request.state.correlation_id},
+                timeout=30.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Catalog service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Catalog error")
+
+@app.get("/api/v1/catalog/source")
+async def get_source_proxy(request: Request, context: TenantContext = Depends(get_tenant_context)):
+    """Proxy catalog source request to catalog service."""
+    try:
+        CATALOG_URL = "http://catalog:8002"
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{CATALOG_URL}/api/v1/catalog/source",
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Catalog service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Catalog error")
+
+@app.get("/api/v1/catalog/tables")
+async def get_tables_proxy(request: Request, context: TenantContext = Depends(get_tenant_context)):
+    """Proxy catalog tables request to catalog service."""
+    try:
+        CATALOG_URL = "http://catalog:8002"
+        
+        async with httpx.AsyncClient() as client:
+            is_admin = str("admin" in context.roles).lower()
+            resp = await client.get(
+                f"{CATALOG_URL}/api/v1/catalog/tables",
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id, "X-Is-Admin": is_admin},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Catalog service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Catalog error")
+
+@app.get("/v1/conversations")
+async def list_conversations(
+    request: Request,
+    context: TenantContext = Depends(get_tenant_context)
+):
+    """List conversations for the current user."""
+    correlation_id = request.state.correlation_id
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{ORCHESTRATOR_URL}/internal/conversations",
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id},
+                headers={"X-Correlation-ID": correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Orchestrator unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Orchestrator error")
+
+
+@app.get("/v1/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    request: Request,
+    context: TenantContext = Depends(get_tenant_context)
+):
+    """Get a specific conversation."""
+    correlation_id = request.state.correlation_id
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{ORCHESTRATOR_URL}/internal/conversations/{conversation_id}",
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id},
+                headers={"X-Correlation-ID": correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Orchestrator unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Orchestrator error")
+
+
+# ── Internal Endpoints ─────────────────────────────────────
+
 
 class CreateConversationRequest(BaseModel):
     title: str | None = None
@@ -163,3 +317,137 @@ async def stream_run_events(
             "X-Accel-Buffering": "no" # Essential for Nginx to not buffer SSE
         }
     )
+
+
+# ── Admin Datasource Endpoints ─────────────────────────────────
+class PolicyUpdateRequest(BaseModel):
+    is_allowed: bool
+
+@app.get('/v1/datasources')
+async def get_datasources(request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f'{CATALOG_URL}/api/v1/catalog/source',
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return [resp.json()] # Return as list since it asks for datasources
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post('/v1/datasources/{source_id}/sync')
+async def sync_datasource(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f'{CATALOG_URL}/api/v1/catalog/sync',
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=30.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get('/v1/datasources/{source_id}/catalog')
+async def get_datasource_catalog(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f'{CATALOG_URL}/api/v1/catalog/tables',
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Is-Admin': 'true'},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.patch('/v1/datasources/{source_id}/catalog/tables/{table_id}')
+async def patch_table_policy(source_id: str, table_id: int, body: PolicyUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f'{CATALOG_URL}/api/v1/catalog/tables/{table_id}',
+                json=body.model_dump(),
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.patch('/v1/datasources/{source_id}/catalog/tables/{table_id}/columns/{column_id}')
+async def patch_column_policy(source_id: str, table_id: int, column_id: int, body: PolicyUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f'{CATALOG_URL}/api/v1/catalog/columns/{column_id}',
+                json=body.model_dump(),
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get('/v1/datasources/audit')
+async def get_audit_logs_proxy(request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f'{CATALOG_URL}/api/v1/catalog/audit',
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class SemanticMetricRequest(BaseModel):
+    name: str
+    description: str | None = None
+    sql_expression: str
+
+@app.post('/v1/datasources/{source_id}/metrics')
+async def create_metric_proxy(source_id: str, body: SemanticMetricRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f'{CATALOG_URL}/api/v1/catalog/metrics',
+                json=body.model_dump(),
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get('/v1/datasources/{source_id}/metrics')
+async def get_metrics_proxy(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f'{CATALOG_URL}/api/v1/catalog/metrics',
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+

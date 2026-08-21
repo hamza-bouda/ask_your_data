@@ -20,12 +20,12 @@ from contracts.tenant import TenantContext
 
 try:
     from app.jwt_handler import decode_token, TokenError
-    from app.database import get_db, create_tables
-    from app.models import TenantPolicy, RoleBinding, AuthAudit
+    from app.database import get_db, create_tables, SessionLocal
+    from app.models import TenantPolicy, RoleBinding, AuthAudit, User
 except ImportError:
     from backend.services.identity.app.jwt_handler import decode_token, TokenError
-    from backend.services.identity.app.database import get_db, create_tables
-    from backend.services.identity.app.models import TenantPolicy, RoleBinding, AuthAudit
+    from backend.services.identity.app.database import get_db, create_tables, SessionLocal
+    from backend.services.identity.app.models import TenantPolicy, RoleBinding, AuthAudit, User
 
 
 app = create_service_app(service_name="identity")
@@ -35,12 +35,22 @@ app = create_service_app(service_name="identity")
 @app.on_event("startup")
 def on_startup() -> None:
     create_tables()
+    # Seed a default user for testing
+    db = SessionLocal()
+    if not db.query(User).filter(User.username == "hamza").first():
+        db.add(User(id="hamza", tenant_id="acme", username="hamza", password="password"))
+        db.commit()
+    db.close()
 
 
 # ── Request/Response models ──────────────────────────────────────
 
 class ResolveContextRequest(BaseModel):
     token: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 
 class DevTokenRequest(BaseModel):
@@ -247,3 +257,31 @@ def seed_data(body: SeedRequest, db: Session = Depends(get_db)) -> dict:
 
     db.commit()
     return {"status": "seeded", "tenant_id": body.tenant_id}
+
+
+@app.post("/v1/auth/login")
+def login(body: LoginRequest, db: Session = Depends(get_db)) -> dict:
+    """Authenticates user and returns a JWT token."""
+    user = db.query(User).filter(User.username == body.username, User.password == body.password).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    try:
+        from app.dev_tokens import create_dev_token
+    except ImportError:
+        from backend.services.identity.app.dev_tokens import create_dev_token
+
+    # Find roles
+    bindings = db.query(RoleBinding).filter(RoleBinding.user_id == user.id).all()
+    roles = [b.role_name for b in bindings]
+    if not roles:
+        roles = ["analyst"] # default role
+
+    token = create_dev_token(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        roles=roles,
+        expires_in_minutes=1440, # 24 hours
+    )
+    return {"token": token, "user": {"id": user.id, "username": user.username, "tenant_id": user.tenant_id}}
+

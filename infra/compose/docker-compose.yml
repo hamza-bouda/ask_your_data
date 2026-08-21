@@ -5,7 +5,7 @@
 services:
   # ── Infrastructure ─────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: askyourdata
       POSTGRES_PASSWORD: askyourdata_dev
@@ -135,6 +135,51 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - ayd
+
+  semantic-router:
+    build:
+      context: ../../
+      dockerfile: backend/services/semantic_router/Dockerfile
+    ports:
+      - "8008:8008"
+    env_file:
+      - ../../.env
+    networks:
+      - ayd
+
+  sql-generator:
+    build:
+      context: ../../
+      dockerfile: backend/services/sql_generator/Dockerfile
+    ports:
+      - "8006:8006"
+    env_file:
+      - ../../.env
+    networks:
+      - ayd
+
+  sql-executor:
+    build:
+      context: ../../
+      dockerfile: backend/services/sql_executor/Dockerfile
+    ports:
+      - "8007:8007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ayd
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - gateway
     networks:
       - ayd
 
