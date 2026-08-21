@@ -29,12 +29,15 @@ const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'
 
 const ChartRenderer = ({ data, chartSpec }) => {
   const [viewMode, setViewMode] = useState('chart'); // 'chart' or 'table'
+  const [selectedChartType, setSelectedChartType] = useState(null);
 
   if (!data || data.length === 0) return null;
 
   // Fallback to table if no spec is provided
-  const spec = chartSpec || { chart_type: 'table', title: 'Résultats', warnings: [] };
+  const generatedSpec = chartSpec || { chart_type: 'table', title: 'Résultats', warnings: [] };
+  const spec = selectedChartType ? { ...generatedSpec, chart_type: selectedChartType } : generatedSpec;
   const isTableForced = spec.chart_type === 'table';
+  const canChooseChart = Boolean(generatedSpec.x_field && generatedSpec.y_field);
 
   const renderTable = () => {
     const keys = Object.keys(data[0]);
@@ -249,7 +252,7 @@ const ChartRenderer = ({ data, chartSpec }) => {
           {spec.reason && <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>{spec.reason}</p>}
         </div>
         
-        {!isTableForced && (
+        {(!isTableForced || canChooseChart) && (
           <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--background)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)' }}>
             <button
               onClick={() => setViewMode('chart')}
@@ -271,6 +274,28 @@ const ChartRenderer = ({ data, chartSpec }) => {
             >
               <TableIcon size={16} /> Tableau
             </button>
+            {canChooseChart && (
+              <select
+                aria-label="Type de graphique"
+                value={selectedChartType || generatedSpec.chart_type}
+                onChange={(event) => {
+                  const chartType = event.target.value;
+                  setSelectedChartType(chartType === generatedSpec.chart_type ? null : chartType);
+                  setViewMode(chartType === 'table' ? 'table' : 'chart');
+                }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text)', padding: '6px', cursor: 'pointer' }}
+              >
+                <option value="bar">Barres</option>
+                <option value="horizontal_bar">Barres horizontales</option>
+                <option value="line">Ligne</option>
+                <option value="area">Aire</option>
+                <option value="pie">Secteurs</option>
+                <option value="donut">Anneau</option>
+                <option value="scatter">Nuage de points</option>
+                <option value="radar">Radar</option>
+                <option value="table">Tableau</option>
+              </select>
+            )}
           </div>
         )}
       </div>
