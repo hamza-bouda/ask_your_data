@@ -98,6 +98,8 @@ async def login_proxy(body: LoginRequest):
 
 class RegisterRequest(BaseModel):
     connection_string: str
+    name: str | None = None
+    source_id: str | None = None
 
 @app.post("/api/v1/catalog/register")
 async def register_proxy(body: RegisterRequest, request: Request, context: TenantContext = Depends(require_admin)):
@@ -108,7 +110,7 @@ async def register_proxy(body: RegisterRequest, request: Request, context: Tenan
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{CATALOG_URL}/api/v1/catalog/register",
-                json={"connection_string": body.connection_string},
+                json=body.model_dump(),
                 headers={"X-Tenant-Id": context.tenant_id, "X-User-Id": context.user_id, "X-Correlation-ID": request.state.correlation_id},
                 timeout=30.0
             )
@@ -128,7 +130,7 @@ async def get_source_proxy(request: Request, context: TenantContext = Depends(ge
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{CATALOG_URL}/api/v1/catalog/source",
-                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id},
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id, "X-Source-Id": request.headers.get("x-source-id", "")},
                 timeout=10.0
             )
             resp.raise_for_status()
@@ -148,7 +150,7 @@ async def get_tables_proxy(request: Request, context: TenantContext = Depends(ge
             is_admin = str("admin" in context.roles).lower()
             resp = await client.get(
                 f"{CATALOG_URL}/api/v1/catalog/tables",
-                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id, "X-Is-Admin": is_admin},
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id, "X-Is-Admin": is_admin, "X-Source-Id": request.headers.get("x-source-id", "")},
                 timeout=10.0
             )
             resp.raise_for_status()
@@ -165,7 +167,7 @@ async def preview_table_proxy(table_name: str, request: Request, limit: int = 10
             response = await client.get(
                 f"http://catalog:8002/api/v1/catalog/tables/{table_name}/preview",
                 params={"limit": limit},
-                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id},
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id, "X-Source-Id": request.headers.get("x-source-id", "")},
                 timeout=15.0,
             )
             response.raise_for_status()
@@ -397,35 +399,29 @@ class PolicyUpdateRequest(BaseModel):
     is_allowed: bool
 
 
-def ensure_tenant_source(source_id: str, context: TenantContext) -> None:
-    """Compatibility guard until catalog records are fully source-scoped."""
-    if source_id != context.tenant_id:
-        raise HTTPException(status_code=404, detail="Datasource not found")
-
 @app.get('/v1/datasources')
 async def get_datasources(request: Request, context: TenantContext = Depends(require_admin)):
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f'{CATALOG_URL}/api/v1/catalog/source',
+                f'{CATALOG_URL}/api/v1/catalog/sources',
                 headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
                 timeout=10.0
             )
             resp.raise_for_status()
-            return [resp.json()] # Return as list since it asks for datasources
+            return resp.json().get("sources", [])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post('/v1/datasources/{source_id}/sync')
 async def sync_datasource(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
-    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f'{CATALOG_URL}/api/v1/catalog/sync',
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Source-Id': source_id},
                 timeout=30.0
             )
             resp.raise_for_status()
@@ -435,13 +431,12 @@ async def sync_datasource(source_id: str, request: Request, context: TenantConte
 
 @app.get('/v1/datasources/{source_id}/catalog')
 async def get_datasource_catalog(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
-    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f'{CATALOG_URL}/api/v1/catalog/tables',
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Is-Admin': 'true'},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Is-Admin': 'true', 'X-Source-Id': source_id},
                 timeout=10.0
             )
             resp.raise_for_status()
@@ -451,14 +446,13 @@ async def get_datasource_catalog(source_id: str, request: Request, context: Tena
 
 @app.patch('/v1/datasources/{source_id}/catalog/tables/{table_id}')
 async def patch_table_policy(source_id: str, table_id: int, body: PolicyUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
-    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.patch(
                 f'{CATALOG_URL}/api/v1/catalog/tables/{table_id}',
                 json=body.model_dump(),
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Source-Id': source_id},
                 timeout=10.0
             )
             resp.raise_for_status()
@@ -468,14 +462,13 @@ async def patch_table_policy(source_id: str, table_id: int, body: PolicyUpdateRe
 
 @app.patch('/v1/datasources/{source_id}/catalog/tables/{table_id}/columns/{column_id}')
 async def patch_column_policy(source_id: str, table_id: int, column_id: int, body: PolicyUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
-    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.patch(
                 f'{CATALOG_URL}/api/v1/catalog/columns/{column_id}',
                 json=body.model_dump(),
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Source-Id': source_id},
                 timeout=10.0
             )
             resp.raise_for_status()
@@ -505,14 +498,13 @@ class SemanticMetricRequest(BaseModel):
 
 @app.post('/v1/datasources/{source_id}/metrics')
 async def create_metric_proxy(source_id: str, body: SemanticMetricRequest, request: Request, context: TenantContext = Depends(require_admin)):
-    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f'{CATALOG_URL}/api/v1/catalog/metrics',
                 json=body.model_dump(),
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Source-Id': source_id},
                 timeout=10.0
             )
             resp.raise_for_status()
@@ -522,13 +514,12 @@ async def create_metric_proxy(source_id: str, body: SemanticMetricRequest, reque
 
 @app.get('/v1/datasources/{source_id}/metrics')
 async def get_metrics_proxy(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
-    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f'{CATALOG_URL}/api/v1/catalog/metrics',
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Source-Id': source_id},
                 timeout=10.0
             )
             resp.raise_for_status()
