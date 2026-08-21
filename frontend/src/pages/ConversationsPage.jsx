@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import DebugPanel from '../components/DebugPanel';
-import { getConversations, createConversation, getConversation, sendMessage, waitForRun } from '../services/api';
+import { getConversations, createConversation, getConversation, getRun, sendMessage, streamRunEvents, waitForRun } from '../services/api';
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState([]);
@@ -14,6 +13,7 @@ export default function ConversationsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [debugData, setDebugData] = useState(null);
   const [showDebug, setShowDebug] = useState(true);
+  const [runStage, setRunStage] = useState(null);
   
   const messagesEndRef = useRef(null);
   const hasDataResult = (message) => (
@@ -121,7 +121,27 @@ export default function ConversationsPage() {
       }
 
       const queuedRun = await sendMessage(currentConvId, userMessage);
-      const response = await waitForRun(queuedRun.run_id);
+      setRunStage('En attente du traitement…');
+      try {
+        await streamRunEvents(queuedRun.run_id, (event) => {
+          const stages = {
+            run_started: 'Analyse de votre demande…',
+            retrieval_completed: 'Recherche du catalogue de données…',
+            planning: 'Préparation de la requête…',
+            sql_generating: 'Génération SQL…',
+            sql_validating: 'Validation de sécurité…',
+            query_executing: 'Exécution de la requête…',
+            visualization_generating: 'Préparation de la visualisation…',
+            clarification_requested: 'Une précision est nécessaire…',
+          };
+          setRunStage(stages[event.event_type] || 'Analyse en cours…');
+        });
+      } catch (streamError) {
+        // The persisted run remains authoritative if an intermediary closes SSE.
+        console.warn('SSE unavailable, falling back to status polling', streamError);
+        await waitForRun(queuedRun.run_id);
+      }
+      const response = await getRun(queuedRun.run_id);
 
       if (['failed', 'error'].includes(response.status)) {
         throw new Error(response.error_message || "L'analyse n'a pas pu être terminée.");
@@ -160,6 +180,7 @@ export default function ConversationsPage() {
       }]);
     } finally {
       setIsLoading(false);
+      setRunStage(null);
     }
   };
 
@@ -245,6 +266,7 @@ export default function ConversationsPage() {
           {isLoading && (
             <div className="typing-indicator">
               <div className="typing-dot"></div>
+              <span>{runStage || 'Analyse en cours…'}</span>
               <div className="typing-dot"></div>
               <div className="typing-dot"></div>
             </div>

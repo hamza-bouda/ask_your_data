@@ -56,6 +56,46 @@ export const waitForRun = async (runId, timeoutMs = 60000) => {
   throw new Error("L'analyse prend plus de temps que prévu. Réessayez dans quelques instants.");
 };
 
+/**
+ * Consume the run SSE stream with fetch so the JWT remains in the
+ * Authorization header. Native EventSource cannot send that header.
+ */
+export const streamRunEvents = async (runId, onEvent, signal) => {
+  const token = localStorage.getItem('token');
+  const response = await fetch(`${API_URL}/v1/runs/${runId}/events`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new Error('Le flux temps réel est indisponible.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let terminal = false;
+
+  while (!terminal) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const messages = buffer.split('\n\n');
+    buffer = messages.pop() || '';
+    for (const message of messages) {
+      const payload = message
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trim())
+        .join('');
+      if (!payload) continue;
+      const event = JSON.parse(payload);
+      onEvent(event);
+      terminal = ['result_ready', 'run_failed'].includes(event.event_type);
+      if (terminal) break;
+    }
+  }
+};
+
 export const sendMessage = async (conversationId, message) => {
   try {
     const response = await api.post(`/v1/conversations/${conversationId}/messages`, { message });
