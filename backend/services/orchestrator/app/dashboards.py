@@ -16,6 +16,7 @@ CSV_EXPORTS_TOTAL = Counter("csv_exports_total", "Total CSV exports requested", 
 DASHBOARDS_CREATED_TOTAL = Counter("dashboards_created_total", "Total dashboards created")
 
 router = APIRouter()
+VALID_VISIBILITIES = {"private", "tenant_viewers"}
 
 # --- Pydantic Models ---
 
@@ -64,6 +65,8 @@ def create_dashboard(
     user_id: str = Query(...),
     db: Session = Depends(get_db)
 ):
+    if body.visibility not in VALID_VISIBILITIES:
+        raise HTTPException(status_code=422, detail="Invalid dashboard visibility")
     dashboard = Dashboard(
         tenant_id=tenant_id,
         owner_user_id=user_id,
@@ -169,6 +172,8 @@ def update_dashboard(
     if body.description is not None:
         dashboard.description = body.description
     if body.visibility is not None:
+        if body.visibility not in VALID_VISIBILITIES:
+            raise HTTPException(status_code=422, detail="Invalid dashboard visibility")
         dashboard.visibility = body.visibility
         
     db.commit()
