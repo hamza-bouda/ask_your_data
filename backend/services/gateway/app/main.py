@@ -274,6 +274,7 @@ async def create_conversation(
                 json={
                     "tenant_id": context.tenant_id,
                     "user_id": context.user_id,
+                    "source_id": request.headers.get("x-source-id") or None,
                     "title": body.title,
                 },
                 headers={"X-Correlation-ID": correlation_id},
@@ -305,6 +306,7 @@ async def send_message(
                 json={
                     "tenant_id": context.tenant_id,
                     "user_id": context.user_id,
+                    "source_id": request.headers.get("x-source-id") or None,
                     "message": body.message,
                 },
                 headers={"X-Correlation-ID": correlation_id},

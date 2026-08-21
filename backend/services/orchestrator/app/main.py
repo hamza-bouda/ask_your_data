@@ -74,12 +74,14 @@ async def on_shutdown():
 class CreateConversationRequest(BaseModel):
     tenant_id: str
     user_id: str
+    source_id: Optional[str] = None
     title: Optional[str] = None
 
 class ConversationResponse(BaseModel):
     id: str
     tenant_id: str
     user_id: str
+    source_id: Optional[str] = None
     title: str
     created_at: datetime
     updated_at: datetime
@@ -87,6 +89,7 @@ class ConversationResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     tenant_id: str
     user_id: str
+    source_id: Optional[str] = None
     message: str
 
 class MessageResponse(BaseModel):
@@ -131,6 +134,7 @@ async def create_conversation(body: CreateConversationRequest, db: Session = Dep
     conv = Conversation(
         tenant_id=body.tenant_id,
         user_id=body.user_id,
+        source_id=body.source_id,
         title=body.title or "Nouvelle conversation"
     )
     db.add(conv)
@@ -157,7 +161,6 @@ async def get_conversation(conversation_id: str, tenant_id: str, user_id: str, d
     ).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-        
     return {
         "conversation": conv,
         "messages": conv.messages
@@ -217,6 +220,10 @@ async def send_message(
     ).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if body.source_id and conv.source_id and body.source_id != conv.source_id:
+        raise HTTPException(status_code=409, detail="Conversation belongs to a different datasource")
+    if body.source_id and not conv.source_id:
+        conv.source_id = body.source_id
         
     # Auto-title on first message
     if len(conv.messages) == 0 and conv.title == "Nouvelle conversation":
@@ -238,6 +245,7 @@ async def send_message(
         conversation_id=conversation_id,
         tenant_id=body.tenant_id,
         user_id=body.user_id,
+        source_id=conv.source_id,
         status="pending",
         stage="init"
     )
@@ -252,6 +260,7 @@ async def send_message(
         "run_id": run_id,
         "tenant_id": body.tenant_id,
         "user_id": body.user_id,
+        "source_id": conv.source_id or "",
         "conversation_id": conversation_id,
         "correlation_id": correlation_id,
         "question": body.message

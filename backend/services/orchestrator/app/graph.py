@@ -29,7 +29,8 @@ def retrieve_node(state: ConversationState) -> dict:
         try:
             response = httpx.post(f"{SEMANTIC_ROUTER_URL}/internal/catalog/search", json={
                 "query": state.question,
-                "tenant_id": state.tenant_id
+                "tenant_id": state.tenant_id,
+                "source_id": state.source_id,
             }, timeout=10.0)
             response.raise_for_status()
             data = response.json()
@@ -124,7 +125,8 @@ def execute_sql_node(state: ConversationState) -> dict:
         try:
             response = httpx.post(f"{SQL_EXECUTOR_URL}/internal/execute-sql", json={
                 "sql_query": state.sql_query,
-                "tenant_id": state.tenant_id
+                "tenant_id": state.tenant_id,
+                "source_id": state.source_id,
             }, timeout=10.0)
         
             # If execution fails (e.g. safety check), trigger repair

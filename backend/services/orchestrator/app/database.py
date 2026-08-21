@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 if os.getenv("TESTING") == "1":
@@ -23,3 +23,7 @@ def get_db():
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_id VARCHAR"))
+            conn.execute(text("ALTER TABLE runs ADD COLUMN IF NOT EXISTS source_id VARCHAR"))

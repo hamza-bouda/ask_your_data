@@ -31,6 +31,7 @@ setup_metrics(app)
 class ExecuteSqlRequest(BaseModel):
     sql_query: str
     tenant_id: str
+    source_id: str | None = None
 
 
 class ExecuteSqlResponse(BaseModel):
@@ -47,7 +48,7 @@ async def execute_sql_endpoint(body: ExecuteSqlRequest) -> ExecuteSqlResponse:
         raise HTTPException(status_code=400, detail="SQL query cannot be empty")
         
     try:
-        data = execute_query(sql_query=body.sql_query, tenant_id=body.tenant_id)
+        data = execute_query(sql_query=body.sql_query, tenant_id=body.tenant_id, source_id=body.source_id)
         return ExecuteSqlResponse(
             results=data,
             row_count=len(data)

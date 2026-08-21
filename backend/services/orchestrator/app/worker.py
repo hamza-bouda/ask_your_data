@@ -85,6 +85,7 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
     run_id = data.get("run_id")
     tenant_id = data.get("tenant_id")
     user_id = data.get("user_id")
+    source_id = data.get("source_id") or None
     conversation_id = data.get("conversation_id")
     correlation_id = data.get("correlation_id", "")
     question = data.get("question", "")
@@ -94,6 +95,7 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
     
     with tracer.start_as_current_span("process_message", context=ctx) as span:
         span.set_attribute("tenant_id", tenant_id or "")
+        span.set_attribute("source_id", source_id or "")
         span.set_attribute("correlation_id", correlation_id)
         span.set_attribute("run_id", run_id or "")
         # Do not log question directly to avoid leaking PII/secrets
@@ -102,6 +104,7 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
             correlation_id=correlation_id,
             run_id=run_id,
             tenant_id=tenant_id,
+            source_id=source_id,
             conversation_id=conversation_id
         )
 
@@ -183,6 +186,7 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
                 initial_state = ConversationState(
                     tenant_id=tenant_id,
                     user_id=user_id,
+                    source_id=source_id,
                     conversation_id=conversation_id,
                     question=question,
                     run_id=run_id,

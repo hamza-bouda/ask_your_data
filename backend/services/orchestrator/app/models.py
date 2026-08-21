@@ -10,6 +10,7 @@ class ConversationState(BaseModel):
     # Input
     tenant_id: str
     user_id: str
+    source_id: Optional[str] = None
     conversation_id: str
     question: str
     run_id: str

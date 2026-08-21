@@ -53,7 +53,7 @@ MOCK_SCHEMA = [
 
 CATALOG_URL = os.getenv("CATALOG_URL", "http://catalog:8002")
 
-def search_catalog(query: str, tenant_id: str) -> CatalogSearchResult:
+def search_catalog(query: str, tenant_id: str, source_id: str | None = None) -> CatalogSearchResult:
     """Search the catalog for tables relevant to the query via the Catalog service."""
     try:
         # Schema discovery needs the complete allowlisted catalog, not a fuzzy RAG
@@ -63,7 +63,7 @@ def search_catalog(query: str, tenant_id: str) -> CatalogSearchResult:
         if is_discovery:
             response = requests.get(
                 f"{CATALOG_URL}/api/v1/catalog/tables",
-                headers={"X-Tenant-Id": tenant_id, "X-Is-Admin": "false"},
+                headers={"X-Tenant-Id": tenant_id, "X-Is-Admin": "false", "X-Source-Id": source_id or ""},
                 timeout=10,
             )
             response.raise_for_status()
@@ -75,7 +75,7 @@ def search_catalog(query: str, tenant_id: str) -> CatalogSearchResult:
 
         resp = requests.post(
             f"{CATALOG_URL}/internal/catalog/search",
-            json={"query": query, "tenant_id": tenant_id, "top_k": 5},
+            json={"query": query, "tenant_id": tenant_id, "source_id": source_id, "top_k": 5},
             timeout=10
         )
         resp.raise_for_status()

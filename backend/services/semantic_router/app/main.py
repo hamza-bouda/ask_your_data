@@ -38,6 +38,7 @@ class PlanRequest(BaseModel):
 class CatalogSearchRequest(BaseModel):
     query: str
     tenant_id: str
+    source_id: Optional[str] = None
 
 
 # ── Endpoints ────────────────────────────────────────────────────
@@ -58,4 +59,4 @@ async def catalog_search(body: CatalogSearchRequest) -> CatalogSearchResult:
     if not body.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-    return search_catalog(query=body.query, tenant_id=body.tenant_id)
+    return search_catalog(query=body.query, tenant_id=body.tenant_id, source_id=body.source_id)

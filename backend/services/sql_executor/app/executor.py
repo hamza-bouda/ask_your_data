@@ -20,7 +20,7 @@ class SqlExecutionError(Exception):
         self.message = message
         super().__init__(self.message)
 
-def get_allowed_schema(tenant_id: str) -> dict:
+def get_allowed_schema(tenant_id: str, source_id: str | None = None) -> dict:
     """Fetch the allowed tables and columns from the global catalog."""
     try:
         from app.connection_manager import _global_engine
@@ -30,9 +30,10 @@ def get_allowed_schema(tenant_id: str) -> dict:
     allowed = {}
     with _global_engine.connect() as conn:
         # Check if database is allowed
+        source_id = source_id or tenant_id
         db_res = conn.execute(
-            text("SELECT is_allowed FROM tenant_databases WHERE tenant_id = :tenant_id AND status = 'active'"),
-            {"tenant_id": tenant_id}
+            text("SELECT is_allowed FROM data_sources WHERE id = :source_id AND tenant_id = :tenant_id AND status = 'active'"),
+            {"tenant_id": tenant_id, "source_id": source_id}
         ).fetchone()
         
         if not db_res or not db_res[0]:
@@ -44,11 +45,11 @@ def get_allowed_schema(tenant_id: str) -> dict:
             SELECT t.table_name, c.column_name 
             FROM tables t 
             JOIN columns c ON t.id = c.table_id 
-            WHERE t.tenant_id = :tenant_id 
+            WHERE t.source_id = :source_id
               AND t.is_allowed IS TRUE
               AND c.is_allowed IS TRUE
             """),
-            {"tenant_id": tenant_id}
+            {"source_id": source_id}
         )
         for row in res:
             t_name = row[0].lower()
@@ -58,7 +59,7 @@ def get_allowed_schema(tenant_id: str) -> dict:
             allowed[t_name].add(c_name)
     return allowed
 
-def log_audit(tenant_id: str, sql_query: str, decision: str, duration_ms: int, row_count: int, status: str, error_msg: str):
+def log_audit(tenant_id: str, sql_query: str, decision: str, duration_ms: int, row_count: int, status: str, error_msg: str, source_id: str | None = None):
     """Write an execution audit to the global database."""
     try:
         from app.connection_manager import _global_engine
@@ -72,12 +73,13 @@ def log_audit(tenant_id: str, sql_query: str, decision: str, duration_ms: int, r
             conn.execute(
                 text("""
                 INSERT INTO execution_audits 
-                (tenant_id, sql_hash, decision, duration_ms, row_count, status, error, created_at)
+                (tenant_id, source_id, sql_hash, decision, duration_ms, row_count, status, error, created_at)
                 VALUES 
-                (:tenant_id, :sql_hash, :decision, :duration_ms, :row_count, :status, :error, CURRENT_TIMESTAMP)
+                (:tenant_id, :source_id, :sql_hash, :decision, :duration_ms, :row_count, :status, :error, CURRENT_TIMESTAMP)
                 """),
                 {
                     "tenant_id": tenant_id,
+                    "source_id": source_id or tenant_id,
                     "sql_hash": sql_hash,
                     "decision": decision,
                     "duration_ms": duration_ms,
@@ -87,7 +89,7 @@ def log_audit(tenant_id: str, sql_query: str, decision: str, duration_ms: int, r
                 }
             )
 
-def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "postgres") -> str:
+def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "postgres", source_id: str | None = None) -> str:
     """Check that the SQL query is safe and allowed, then inject LIMIT."""
     sqlglot_dialect = {
         "postgresql": "postgres",
@@ -131,7 +133,7 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
             raise SqlExecutionError("Forbidden operation detected in AST.")
 
     # 4. Check Policy Allowlist
-    allowed_schema = get_allowed_schema(tenant_id)
+    allowed_schema = get_allowed_schema(tenant_id) if source_id is None else get_allowed_schema(tenant_id, source_id)
     if not allowed_schema:
         raise SqlExecutionError("No database or tables are allowed by policy for this tenant.")
         
@@ -205,7 +207,7 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
     return ast.sql(dialect=sqlglot_dialect)
 
 
-def execute_query(sql_query: str, tenant_id: str) -> list[dict[str, Any]]:
+def execute_query(sql_query: str, tenant_id: str, source_id: str | None = None) -> list[dict[str, Any]]:
     """Execute a validated SQL query for a specific tenant and return the results."""
     
     start_time = time.time()
@@ -216,19 +218,19 @@ def execute_query(sql_query: str, tenant_id: str) -> list[dict[str, Any]]:
         from backend.services.sql_executor.app.connection_manager import get_tenant_session
         
     try:
-        db = get_tenant_session(tenant_id)
+        db = get_tenant_session(tenant_id, source_id)
     except Exception as exc:
         raise SqlExecutionError(f"Database Connection Error: {str(exc)}")
         
     dialect_name = db.bind.dialect.name
     
     try:
-        safe_sql = validate_and_prepare_sql(sql_query, tenant_id, dialect=dialect_name)
+        safe_sql = validate_and_prepare_sql(sql_query, tenant_id, dialect=dialect_name, source_id=source_id)
     except SqlExecutionError as exc:
-        log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", exc.message)
+        log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", exc.message, source_id)
         raise
     except Exception as exc:
-        log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", "Internal Validation Error")
+        log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", "Internal Validation Error", source_id)
         raise SqlExecutionError("Internal Validation Error")
     
     try:
@@ -244,19 +246,19 @@ def execute_query(sql_query: str, tenant_id: str) -> list[dict[str, Any]]:
         data = [dict(zip(columns, row)) for row in result.fetchall()]
         
         duration_ms = int((time.time() - start_time) * 1000)
-        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, len(data), "SUCCESS", "")
+        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, len(data), "SUCCESS", "", source_id)
         return data
         
     except SQLAlchemyError as exc:
         db.rollback()
         duration_ms = int((time.time() - start_time) * 1000)
         error_msg = f"Database error: {str(exc.orig) if hasattr(exc, 'orig') else str(exc)}"
-        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", error_msg)
+        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", error_msg, source_id)
         raise SqlExecutionError("Database error during execution.")
     except Exception as exc:
         db.rollback()
         duration_ms = int((time.time() - start_time) * 1000)
-        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", "Internal execution error")
+        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", "Internal execution error", source_id)
         raise SqlExecutionError("Internal execution error.")
     finally:
         db.close()
