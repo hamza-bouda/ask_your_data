@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   createAdminMetric, getAdminAudit, getAdminCatalog, getAdminDatasources,
-  getAdminMetrics, registerDatabase, syncAdminDatasource, updateColumnPolicy,
+  getActiveSourceId, getAdminMetrics, registerDatabase, syncAdminDatasource, updateColumnPolicy,
   updateTablePolicy,
 } from '../services/api';
 
@@ -74,7 +74,10 @@ export default function AdminDataPage() {
     setIsFetching(true);
     try {
       const sources = await getAdminDatasources();
-      const source = sources?.find((item) => item.connected) || null;
+      const activeSourceId = getActiveSourceId();
+      const source = sources?.find((item) => item.id === activeSourceId)
+        || sources?.find((item) => item.connected)
+        || null;
       setSourceData(source);
       if (source?.id) await fetchCatalog(source.id);
     } catch (requestError) {
@@ -106,7 +109,7 @@ export default function AdminDataPage() {
     event.preventDefault();
     setIsLoading(true); setError(null);
     try {
-      await registerDatabase(connectionString);
+      await registerDatabase(connectionString, { sourceId: sourceData?.id });
       await fetchSourceStatus();
       setShowForm(false);
     } catch {
