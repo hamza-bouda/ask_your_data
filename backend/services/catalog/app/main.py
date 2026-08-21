@@ -436,10 +436,11 @@ def get_source_status(request: Request, db: Session = Depends(get_db)):
     tenant_id = request.headers.get("x-tenant-id", "acme")
     db_record = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id).first()
     if not db_record:
-        return {"connected": False, "table_count": 0}
+        return {"connected": False, "table_count": 0, "id": None}
     
     table_count = db.query(TableSchema).filter(TableSchema.tenant_id == tenant_id).count()
     return {
+        "id": db_record.tenant_id,
         "connected": True, 
         "table_count": table_count,
         "name": db_record.name,

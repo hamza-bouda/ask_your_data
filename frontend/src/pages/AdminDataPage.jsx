@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Link, CheckCircle, PlusCircle, RefreshCw, Table as TableIcon, Lock, Unlock, Settings, Activity, BookOpen, Plus } from 'lucide-react';
+import { Database, Link, CheckCircle, RefreshCw, Table as TableIcon, Lock, Settings, Activity, BookOpen, Plus, LayoutList } from 'lucide-react';
 import { registerDatabase, getAdminDatasources, syncAdminDatasource, getAdminCatalog, updateTablePolicy, updateColumnPolicy, getAdminAudit, getAdminMetrics, createAdminMetric } from '../services/api';
 
 export default function AdminDataPage() {
@@ -28,7 +28,7 @@ export default function AdminDataPage() {
       const data = await getAdminDatasources();
       if (data && data.length > 0 && data[0].connected) {
         setSourceData(data[0]);
-        await fetchCatalog(data[0].name || 'acme'); // Ideally source ID, using default for now
+        await fetchCatalog(data[0].id);
       }
     } catch (err) {
       console.error("Failed to fetch source status", err);
@@ -63,8 +63,9 @@ export default function AdminDataPage() {
     }
   }, [activeTab]);
   const fetchMetrics = async () => {
+    if (!sourceData?.id) return;
     try {
-      const data = await getAdminMetrics('acme');
+      const data = await getAdminMetrics(sourceData.id);
       setMetrics(data.metrics || []);
     } catch (err) {
       console.error("Failed to fetch metrics", err);
@@ -74,7 +75,7 @@ export default function AdminDataPage() {
   const handleCreateMetric = async (e) => {
     e.preventDefault();
     try {
-      await createAdminMetric('acme', newMetric);
+      await createAdminMetric(sourceData.id, newMetric);
       setShowMetricForm(false);
       setNewMetric({name: '', description: '', sql_expression: ''});
       fetchMetrics();
@@ -100,9 +101,10 @@ export default function AdminDataPage() {
   };
 
   const handleSync = async () => {
+    if (!sourceData?.id) return;
     setIsLoading(true);
     try {
-      await syncAdminDatasource('acme'); // Default ID
+      await syncAdminDatasource(sourceData.id);
       await fetchSourceStatus();
     } catch (err) {
       setError("Erreur lors de la synchronisation.");
@@ -112,9 +114,10 @@ export default function AdminDataPage() {
   };
 
   const handleTableToggle = async (table) => {
+    if (!sourceData?.id) return;
     try {
       const newStatus = !table.is_allowed;
-      await updateTablePolicy('acme', table.id, newStatus);
+      await updateTablePolicy(sourceData.id, table.id, newStatus);
       
       // Update local state
       const updatedTables = tables.map(t => 
@@ -131,9 +134,10 @@ export default function AdminDataPage() {
   };
 
   const handleColumnToggle = async (tableId, column) => {
+    if (!sourceData?.id) return;
     try {
       const newStatus = !column.is_allowed;
-      await updateColumnPolicy('acme', tableId, column.id, newStatus);
+      await updateColumnPolicy(sourceData.id, tableId, column.id, newStatus);
       
       // Update local state
       const updatedTables = tables.map(t => {
@@ -157,13 +161,14 @@ export default function AdminDataPage() {
   };
 
   const handleDenyAll = async () => {
+      if (!sourceData?.id) return;
       if(window.confirm("Voulez-vous vraiment interdire l'accès à TOUTES les tables ? Cette action est immédiate.")) {
           for(const t of tables) {
               if (t.is_allowed) {
-                  await updateTablePolicy('acme', t.id, false);
+                  await updateTablePolicy(sourceData.id, t.id, false);
               }
           }
-          await fetchCatalog('acme');
+          await fetchCatalog(sourceData.id);
       }
   }
 
