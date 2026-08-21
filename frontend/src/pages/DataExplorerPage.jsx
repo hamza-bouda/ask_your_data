@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Table as TableIcon, LayoutList, RefreshCw } from 'lucide-react';
-import { getTables, getDataSource } from '../services/api';
+import { getTables, getDataSource, getTablePreview } from '../services/api';
 
 export default function DataExplorerPage() {
   const [tables, setTables] = useState([]);
   const [selectedTable, setSelectedTable] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -30,6 +32,15 @@ export default function DataExplorerPage() {
     };
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!selectedTable) return;
+    setPreview(null);
+    setPreviewError(null);
+    getTablePreview(selectedTable.table_name)
+      .then(setPreview)
+      .catch(() => setPreviewError("Aperçu indisponible pour cette table."));
+  }, [selectedTable]);
 
   if (isLoading) {
     return (
@@ -108,8 +119,15 @@ export default function DataExplorerPage() {
               </table>
             </div>
             
-            <div className="table-preview empty-state small">
-              <p>Aperçu des données non disponible</p>
+            <div className="table-preview">
+              <h3>Aperçu sécurisé (10 lignes maximum)</h3>
+              {previewError && <p className="error-message">{previewError}</p>}
+              {!preview && !previewError && <p>Chargement de l’aperçu…</p>}
+              {preview && (
+                preview.rows.length ? (
+                  <div style={{ overflowX: 'auto' }}><table className="data-table"><thead><tr>{preview.columns.map(column => <th key={column}>{column}</th>)}</tr></thead><tbody>{preview.rows.map((row, index) => <tr key={index}>{preview.columns.map(column => <td key={column}>{String(row[column] ?? '')}</td>)}</tr>)}</tbody></table></div>
+                ) : <p>Aucune ligne disponible.</p>
+              )}
             </div>
           </div>
         ) : (

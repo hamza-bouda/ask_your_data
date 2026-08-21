@@ -158,6 +158,23 @@ async def get_tables_proxy(request: Request, context: TenantContext = Depends(ge
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=exc.response.status_code, detail="Catalog error")
 
+@app.get("/api/v1/catalog/tables/{table_name}/preview")
+async def preview_table_proxy(table_name: str, request: Request, limit: int = 10, context: TenantContext = Depends(get_tenant_context)):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"http://catalog:8002/api/v1/catalog/tables/{table_name}/preview",
+                params={"limit": limit},
+                headers={"X-Tenant-Id": context.tenant_id, "X-Correlation-ID": request.state.correlation_id},
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Catalog service unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Catalog preview unavailable")
+
 @app.get("/v1/conversations")
 async def list_conversations(
     request: Request,
