@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import ChartRenderer from '../components/ChartRenderer';
 
 const DashboardDetailPage = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ name: '', description: '', visibility: 'private' });
 
   useEffect(() => {
     fetchDashboard();
@@ -17,10 +20,32 @@ const DashboardDetailPage = () => {
     try {
       const res = await api.get(`/v1/dashboards/${id}`);
       setDashboard(res.data);
+      setDraft({ name: res.data.name, description: res.data.description || '', visibility: res.data.visibility });
       setLoading(false);
     } catch (err) {
       setError(err.response?.data?.detail || err.message);
       setLoading(false);
+    }
+  };
+
+  const saveDashboard = async (event) => {
+    event.preventDefault();
+    try {
+      await api.patch(`/v1/dashboards/${id}`, draft);
+      setEditing(false);
+      await fetchDashboard();
+    } catch (err) {
+      alert("Impossible d’enregistrer le dashboard : " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const deleteDashboard = async () => {
+    if (!window.confirm("Supprimer définitivement ce dashboard ?")) return;
+    try {
+      await api.delete(`/v1/dashboards/${id}`);
+      navigate('/dashboards');
+    } catch (err) {
+      alert("Impossible de supprimer le dashboard : " + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -58,8 +83,32 @@ const DashboardDetailPage = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
         <Link to="/dashboards" className="text-blue-500 hover:underline mb-2 inline-block">&larr; Back to Dashboards</Link>
-        <h1 className="text-3xl font-bold">{dashboard.name}</h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-2">{dashboard.description}</p>
+        {editing ? (
+          <form onSubmit={saveDashboard} style={{ display: 'grid', gap: '10px', maxWidth: '600px' }}>
+            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} required aria-label="Nom du dashboard" />
+            <textarea value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} aria-label="Description du dashboard" />
+            <select value={draft.visibility} onChange={e => setDraft({ ...draft, visibility: e.target.value })} aria-label="Visibilité">
+              <option value="private">Privé</option>
+              <option value="tenant_viewers">Partagé avec le tenant</option>
+            </select>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="submit" className="btn-primary">Enregistrer</button>
+              <button type="button" className="btn-secondary" onClick={() => setEditing(false)}>Annuler</button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h1 className="text-3xl font-bold">{dashboard.name}</h1>
+              <span className="status-badge">{dashboard.visibility === 'private' ? 'Privé' : 'Partagé'}</span>
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">{dashboard.description}</p>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+              <button className="btn-secondary" onClick={() => setEditing(true)}>Modifier</button>
+              <button className="btn-secondary" style={{ color: '#ef4444' }} onClick={deleteDashboard}>Supprimer</button>
+            </div>
+          </>
+        )}
       </div>
 
       {dashboard.items.length === 0 ? (
