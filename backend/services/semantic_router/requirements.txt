@@ -6,4 +6,3 @@ langchain-core>=0.2.0,<0.4
 python-dotenv>=1.0.0
 requests>=2.31.0
 
--e ../../../packages/observability

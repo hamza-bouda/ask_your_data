@@ -4,7 +4,9 @@ WORKDIR /app
 
 # Install contracts package first (shared dependency)
 COPY packages/contracts /tmp/contracts
+COPY packages/observability /tmp/observability
 RUN pip install --no-cache-dir /tmp/contracts && rm -rf /tmp/contracts
+RUN pip install --no-cache-dir /tmp/observability && rm -rf /tmp/observability
 
 # Install service dependencies
 COPY backend/services/sql_generator/requirements.txt .
@@ -16,3 +18,4 @@ COPY backend/services/sql_generator/app ./app
 EXPOSE 8006
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8006"]
+
