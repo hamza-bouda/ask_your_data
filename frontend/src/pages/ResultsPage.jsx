@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Database, LineChart, FileText, ChevronRight } from 'lucide-react';
-import { getConversations, getConversation } from '../services/api';
+import { LineChart } from 'lucide-react';
+import { getResults } from '../services/api';
 import ChartRenderer from '../components/ChartRenderer';
 
 export default function ResultsPage() {
@@ -11,37 +11,10 @@ export default function ResultsPage() {
   useEffect(() => {
     const fetchAllResults = async () => {
       try {
-        const convs = await getConversations();
-        const allResults = [];
-        
-        for (const conv of convs) {
-          const detail = await getConversation(conv.id);
-          for (const msg of detail.messages) {
-            if (msg.role === 'ai' || msg.role === 'assistant') {
-              if (
-                ['DATA_QUERY', 'CHART_GENERATION'].includes(msg.payload?.semantic_plan?.intent)
-                && Array.isArray(msg.payload.results)
-                && msg.payload.results.length > 0
-              ) {
-                allResults.push({
-                  id: msg.id,
-                  date: msg.created_at,
-                  title: msg.payload.chart_spec?.title || `Résultat de ${conv.title}`,
-                  conversationTitle: conv.title,
-                  data: msg.payload.results,
-                  chartSpec: msg.payload.chart_spec,
-                  sql: msg.payload.sql_query
-                });
-              }
-            }
-          }
-        }
-        
-        // Sort by date desc
-        allResults.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setResults(allResults);
-        if (allResults.length > 0) {
-          setSelectedResult(allResults[0]);
+        const data = await getResults();
+        setResults(data.results);
+        if (data.results.length > 0) {
+          setSelectedResult(data.results[0]);
         }
       } catch (error) {
         console.error("Error fetching results", error);
@@ -83,7 +56,7 @@ export default function ResultsPage() {
                   }}
                 >
                   <div style={{ fontWeight: '500', color: 'var(--text)', marginBottom: '4px' }}>{res.title}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{res.conversationTitle}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{res.conversation_title}</div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                     {new Date(res.date).toLocaleString()}
                   </div>
@@ -99,13 +72,13 @@ export default function ResultsPage() {
             <div>
               <h2 style={{ margin: '0 0 16px 0', color: 'var(--text)' }}>{selectedResult.title}</h2>
               <div style={{ color: 'var(--text-muted)', marginBottom: '24px', fontSize: '14px' }}>
-                Extrait de la conversation : <strong>{selectedResult.conversationTitle}</strong>
+                Extrait de la conversation : <strong>{selectedResult.conversation_title}</strong>
               </div>
               
               <div style={{ marginBottom: '24px' }}>
                 <ChartRenderer 
                   data={selectedResult.data} 
-                  chartSpec={selectedResult.chartSpec}
+                  chartSpec={selectedResult.chart_spec}
                 />
               </div>
 

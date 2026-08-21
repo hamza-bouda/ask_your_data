@@ -100,6 +100,12 @@ class ConversationDetailResponse(BaseModel):
     conversation: ConversationResponse
     messages: List[MessageResponse]
 
+class ResultsResponse(BaseModel):
+    results: List[dict[str, Any]]
+    total: int
+    offset: int
+    limit: int
+
 class RunResponse(BaseModel):
     run_id: str
     conversation_id: str | None = None
@@ -156,6 +162,45 @@ async def get_conversation(conversation_id: str, tenant_id: str, user_id: str, d
         "conversation": conv,
         "messages": conv.messages
     }
+
+
+@app.get("/internal/results", response_model=ResultsResponse)
+async def list_results(
+    tenant_id: str,
+    user_id: str,
+    offset: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """Return persisted data results without the client performing N+1 reads."""
+    offset = max(offset, 0)
+    limit = min(max(limit, 1), 100)
+    rows = (
+        db.query(Message, Conversation.title)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(Conversation.tenant_id == tenant_id, Conversation.user_id == user_id)
+        .filter(Message.role.in_(["assistant", "ai"]))
+        .order_by(Message.created_at.desc())
+        .all()
+    )
+    results = []
+    for message, conversation_title in rows:
+        payload = message.payload or {}
+        intent = (payload.get("semantic_plan") or {}).get("intent")
+        data = payload.get("results")
+        if intent not in {"DATA_QUERY", "CHART_GENERATION"} or not isinstance(data, list) or not data:
+            continue
+        results.append({
+            "id": message.id,
+            "date": message.created_at,
+            "title": (payload.get("chart_spec") or {}).get("title") or f"Résultat de {conversation_title}",
+            "conversation_title": conversation_title,
+            "data": data,
+            "chart_spec": payload.get("chart_spec"),
+            "sql": payload.get("sql_query"),
+        })
+    total = len(results)
+    return {"results": results[offset:offset + limit], "total": total, "offset": offset, "limit": limit}
 
 @app.post("/internal/conversations/{conversation_id}/messages", response_model=RunResponse)
 async def send_message(
