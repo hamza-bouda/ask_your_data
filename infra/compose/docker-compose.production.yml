@@ -1,0 +1,93 @@
+# Production overlay. Usage:
+#   Copy infra/compose/.env.production.example to .env.production, fill secrets,
+#   then docker compose --env-file .env.production \
+#     -f infra/compose/docker-compose.yml \
+#     -f infra/compose/docker-compose.production.yml up -d --build
+#
+# Only the browser entry points are published. All data, agent, cache and
+# observability services remain on the private Docker network.
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB}
+
+  redis:
+    ports: !reset []
+
+  gateway:
+    environment:
+      APP_ENV: production
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?set CORS_ALLOW_ORIGINS}
+      ALLOW_SSE_TOKEN_QUERY: "false"
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+
+  identity:
+    environment:
+      APP_ENV: production
+      LOCAL_AUTH_ENABLED: "false"
+      DEV_ENDPOINTS_ENABLED: "false"
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    ports: !reset []
+
+  catalog:
+    env_file: !reset []
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FERNET_KEY: ${FERNET_KEY:?set FERNET_KEY}
+    ports: !reset []
+
+  orchestrator:
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      INTERNAL_ADMIN_TOKEN: ${INTERNAL_ADMIN_TOKEN:?set INTERNAL_ADMIN_TOKEN}
+    ports: !reset []
+
+  worker:
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FERNET_KEY: ${FERNET_KEY:?set FERNET_KEY}
+
+  semantic-router:
+    env_file: !reset []
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
+    ports: !reset []
+
+  sql-generator:
+    env_file: !reset []
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
+    ports: !reset []
+
+  sql-executor:
+    env_file: !reset []
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FERNET_KEY: ${FERNET_KEY:?set FERNET_KEY}
+    ports: !reset []
+
+  query-execution:
+    ports: !reset []
+
+  visualization:
+    ports: !reset []
+
+  frontend:
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+
+  prometheus:
+    ports: !reset []
+
+  grafana:
+    ports: !reset []
+
+  jaeger:
+    ports: !reset []
