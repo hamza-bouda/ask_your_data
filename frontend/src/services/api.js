@@ -158,6 +158,11 @@ export const syncAdminDatasource = async (id) => {
   return response.data;
 };
 
+export const updateAdminDatasource = async (id, changes) => {
+  const response = await api.patch(`/v1/datasources/${id}`, changes);
+  return response.data;
+};
+
 export const getAdminCatalog = async (id) => {
   const response = await api.get(`/v1/datasources/${id}/catalog`);
   return response.data;

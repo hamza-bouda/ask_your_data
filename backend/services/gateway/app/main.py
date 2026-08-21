@@ -101,6 +101,11 @@ class RegisterRequest(BaseModel):
     name: str | None = None
     source_id: str | None = None
 
+
+class SourceUpdateRequest(BaseModel):
+    name: str | None = None
+    status: str | None = None
+
 @app.post("/api/v1/catalog/register")
 async def register_proxy(body: RegisterRequest, request: Request, context: TenantContext = Depends(require_admin)):
     """Proxy catalog register request to catalog service."""
@@ -426,13 +431,32 @@ async def get_datasources(request: Request, context: TenantContext = Depends(req
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f'{CATALOG_URL}/api/v1/catalog/sources',
-                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id},
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Is-Admin': 'true'},
                 timeout=10.0
             )
             resp.raise_for_status()
             return resp.json().get("sources", [])
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch('/v1/datasources/{source_id}')
+async def update_datasource(source_id: str, body: SourceUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    try:
+        CATALOG_URL = 'http://catalog:8002'
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f'{CATALOG_URL}/api/v1/catalog/sources/{source_id}',
+                json=body.model_dump(exclude_none=True),
+                headers={'X-Tenant-Id': context.tenant_id, 'X-User-Id': context.user_id, 'X-Correlation-ID': request.state.correlation_id, 'X-Is-Admin': 'true'},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail='Catalog service unavailable')
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.json().get('detail', 'Catalog error'))
 
 @app.post('/v1/datasources/{source_id}/sync')
 async def sync_datasource(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
