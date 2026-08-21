@@ -22,4 +22,4 @@ __all__ = [
 ]
 
 from .semantic import SemanticPlan
-__all__.append(" SemanticPlan\)
+__all__.append("SemanticPlan")
