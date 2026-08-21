@@ -356,6 +356,12 @@ async def get_run(
 class PolicyUpdateRequest(BaseModel):
     is_allowed: bool
 
+
+def ensure_tenant_source(source_id: str, context: TenantContext) -> None:
+    """Compatibility guard until catalog records are fully source-scoped."""
+    if source_id != context.tenant_id:
+        raise HTTPException(status_code=404, detail="Datasource not found")
+
 @app.get('/v1/datasources')
 async def get_datasources(request: Request, context: TenantContext = Depends(require_admin)):
     try:
@@ -373,6 +379,7 @@ async def get_datasources(request: Request, context: TenantContext = Depends(req
 
 @app.post('/v1/datasources/{source_id}/sync')
 async def sync_datasource(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
+    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
@@ -388,6 +395,7 @@ async def sync_datasource(source_id: str, request: Request, context: TenantConte
 
 @app.get('/v1/datasources/{source_id}/catalog')
 async def get_datasource_catalog(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
+    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
@@ -403,6 +411,7 @@ async def get_datasource_catalog(source_id: str, request: Request, context: Tena
 
 @app.patch('/v1/datasources/{source_id}/catalog/tables/{table_id}')
 async def patch_table_policy(source_id: str, table_id: int, body: PolicyUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
@@ -419,6 +428,7 @@ async def patch_table_policy(source_id: str, table_id: int, body: PolicyUpdateRe
 
 @app.patch('/v1/datasources/{source_id}/catalog/tables/{table_id}/columns/{column_id}')
 async def patch_column_policy(source_id: str, table_id: int, column_id: int, body: PolicyUpdateRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
@@ -455,6 +465,7 @@ class SemanticMetricRequest(BaseModel):
 
 @app.post('/v1/datasources/{source_id}/metrics')
 async def create_metric_proxy(source_id: str, body: SemanticMetricRequest, request: Request, context: TenantContext = Depends(require_admin)):
+    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
@@ -471,6 +482,7 @@ async def create_metric_proxy(source_id: str, body: SemanticMetricRequest, reque
 
 @app.get('/v1/datasources/{source_id}/metrics')
 async def get_metrics_proxy(source_id: str, request: Request, context: TenantContext = Depends(require_admin)):
+    ensure_tenant_source(source_id, context)
     try:
         CATALOG_URL = 'http://catalog:8002'
         async with httpx.AsyncClient() as client:
