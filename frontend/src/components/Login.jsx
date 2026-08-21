@@ -19,7 +19,7 @@ export default function Login() {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       navigate('/sources');
-    } catch (err) {
+    } catch {
       setError("Identifiants incorrects ou serveur injoignable.");
     } finally {
       setIsLoading(false);

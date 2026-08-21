@@ -92,7 +92,7 @@ export default function AdminDataPage() {
     if (!sourceData?.id) return;
     const data = await getAdminMetrics(sourceData.id);
     setMetrics(data.metrics || []);
-  }, [sourceData?.id]);
+  }, [sourceData]);
 
   const fetchAudits = useCallback(async () => {
     const data = await getAdminAudit();
