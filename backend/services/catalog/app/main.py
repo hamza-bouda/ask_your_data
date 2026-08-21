@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import Request, Depends, HTTPException, Body
 from pydantic import BaseModel
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 from sentence_transformers import SentenceTransformer
 from cryptography.fernet import Fernet
@@ -494,3 +494,32 @@ def get_tables(request: Request, db: Session = Depends(get_db)):
         results.append(table_data)
         
     return {"tables": results}
+
+
+@app.get("/api/v1/catalog/tables/{table_name}/preview")
+def preview_table(table_name: str, request: Request, limit: int = 10, db: Session = Depends(get_db)):
+    """Read a bounded preview using only currently allowed table columns."""
+    tenant_id = request.headers.get("x-tenant-id", "acme")
+    table = (
+        db.query(TableSchema)
+        .filter(TableSchema.tenant_id == tenant_id, TableSchema.table_name == table_name,
+                TableSchema.is_allowed.is_(True), TableSchema.is_available.is_(True))
+        .first()
+    )
+    if not table:
+        raise HTTPException(status_code=404, detail="Table not found")
+    columns = [c.column_name for c in table.columns if c.is_allowed and c.is_available]
+    if not columns:
+        raise HTTPException(status_code=403, detail="No columns allowed for preview")
+    source = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id, TenantDatabase.status == "active").first()
+    if not source:
+        raise HTTPException(status_code=409, detail="Datasource is not ready")
+    quote = lambda identifier: '"' + identifier.replace('"', '""') + '"'
+    sql = f"SELECT {', '.join(quote(column) for column in columns)} FROM {quote(table.table_name)} LIMIT :limit"
+    try:
+        engine = create_engine(decrypt_secret(source.connection_string))
+        with engine.connect() as connection:
+            rows = connection.execute(text(sql), {"limit": min(max(limit, 1), 100)}).mappings().all()
+        return {"columns": columns, "rows": [dict(row) for row in rows]}
+    except Exception:
+        raise HTTPException(status_code=502, detail="Data preview is unavailable")

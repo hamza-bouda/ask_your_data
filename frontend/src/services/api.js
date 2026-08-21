@@ -121,6 +121,11 @@ export const getTables = async () => {
   return response.data;
 };
 
+export const getTablePreview = async (tableName, limit = 10) => {
+  const response = await api.get(`/api/v1/catalog/tables/${encodeURIComponent(tableName)}/preview`, { params: { limit } });
+  return response.data;
+};
+
 
 // Admin Endpoints
 export const getAdminDatasources = async () => {
