@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.services.catalog.app.main import app
 from backend.services.catalog.app.database import Base, get_db
-from backend.services.catalog.app.models import TenantDatabase, TableSchema, ColumnSchema
+from backend.services.catalog.app.models import DataSource, TenantDatabase, TableSchema, ColumnSchema
 
 # Setup test DB
 engine = create_engine("sqlite:///:memory:")
@@ -30,11 +30,13 @@ def setup_database():
     
     db.add(TenantDatabase(tenant_id="tenant_A", connection_string="xxx", status="active", is_allowed=True))
     db.add(TenantDatabase(tenant_id="tenant_B", connection_string="yyy", status="active", is_allowed=True))
+    db.add(DataSource(id="source_A", tenant_id="tenant_A", connection_string="xxx", name="Tenant A", status="active"))
+    db.add(DataSource(id="source_B", tenant_id="tenant_B", connection_string="yyy", name="Tenant B", status="active"))
     db.flush()
     
     # Tenant A data
-    t_a = TableSchema(tenant_id="tenant_A", table_name="users", is_allowed=True)
-    t_a_denied = TableSchema(tenant_id="tenant_A", table_name="secrets", is_allowed=False)
+    t_a = TableSchema(tenant_id="tenant_A", source_id="source_A", table_name="users", is_allowed=True)
+    t_a_denied = TableSchema(tenant_id="tenant_A", source_id="source_A", table_name="secrets", is_allowed=False)
     db.add(t_a)
     db.add(t_a_denied)
     db.flush()
@@ -43,7 +45,7 @@ def setup_database():
     db.add(ColumnSchema(table_id=t_a.id, column_name="password", data_type="str", is_allowed=False))
     
     # Tenant B data
-    t_b = TableSchema(tenant_id="tenant_B", table_name="orders", is_allowed=True)
+    t_b = TableSchema(tenant_id="tenant_B", source_id="source_B", table_name="orders", is_allowed=True)
     db.add(t_b)
     
     db.commit()
@@ -107,3 +109,23 @@ def test_policy_mutation_audit():
     assert latest["user_id"] == "admin_123"
     assert latest["action"] == "deny_table"
     assert "users" in latest["target"]
+
+
+def test_archived_source_is_hidden_and_cannot_serve_catalog():
+    archive_response = client.patch(
+        "/api/v1/catalog/sources/source_A",
+        json={"status": "archived"},
+        headers={"x-tenant-id": "tenant_A", "x-user-id": "admin_123"},
+    )
+    assert archive_response.status_code == 200
+    assert archive_response.json()["status"] == "archived"
+
+    analyst_sources = client.get("/api/v1/catalog/sources", headers={"x-tenant-id": "tenant_A"})
+    assert analyst_sources.status_code == 200
+    assert analyst_sources.json()["sources"] == []
+
+    admin_sources = client.get("/api/v1/catalog/sources", headers={"x-tenant-id": "tenant_A", "x-is-admin": "true"})
+    assert [source["id"] for source in admin_sources.json()["sources"]] == ["source_A"]
+
+    catalog_response = client.get("/api/v1/catalog/tables", headers={"x-tenant-id": "tenant_A", "x-source-id": "source_A"})
+    assert catalog_response.status_code == 404

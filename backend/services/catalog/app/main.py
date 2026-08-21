@@ -6,8 +6,12 @@ from fastapi import Request, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
-from sentence_transformers import SentenceTransformer
 from cryptography.fernet import Fernet
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:  # Enables API-contract tests that do not use embeddings.
+    SentenceTransformer = None
 
 from contracts.service_factory import create_service_app
 from observability import setup_logging, setup_tracing, setup_metrics
@@ -31,6 +35,8 @@ cipher_suite = None
 def startup_event():
     global embedder, cipher_suite
     create_tables()
+    if SentenceTransformer is None:
+        raise RuntimeError("sentence-transformers must be installed to run the catalog service")
     print("Loading embedding model...")
     embedder = SentenceTransformer('BAAI/bge-small-en-v1.5')
     print("Embedding model loaded.")
