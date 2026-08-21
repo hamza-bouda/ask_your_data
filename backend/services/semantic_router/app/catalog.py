@@ -5,6 +5,8 @@ or an Elasticsearch index to find the most relevant tables and columns for a giv
 Here we return a static dummy schema for testing.
 """
 
+import os
+import requests
 from typing import Any
 from pydantic import BaseModel
 
@@ -49,10 +51,25 @@ MOCK_SCHEMA = [
 ]
 
 
+CATALOG_URL = os.getenv("CATALOG_URL", "http://catalog:8002")
+
 def search_catalog(query: str, tenant_id: str) -> CatalogSearchResult:
-    """Search the catalog for tables relevant to the query.
-    
-    Currently returns the static MOCK_SCHEMA for all queries.
-    In the future, this will filter based on the tenant_id and semantic relevance.
-    """
-    return CatalogSearchResult(tables=MOCK_SCHEMA)
+    """Search the catalog for tables relevant to the query via the Catalog service."""
+    try:
+        resp = requests.post(
+            f"{CATALOG_URL}/internal/catalog/search",
+            json={"query": query, "tenant_id": tenant_id, "top_k": 5},
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        
+        tables = []
+        for t in data.get("results", []):
+            cols = [ColumnMeta(name=c["name"], type=c["type"], description=c.get("description", "")) for c in t["columns"]]
+            tables.append(TableMeta(name=t["table_name"], description=t.get("description", ""), columns=cols))
+            
+        return CatalogSearchResult(tables=tables)
+    except Exception as e:
+        print(f"Error querying catalog: {e}")
+        return CatalogSearchResult(tables=[])

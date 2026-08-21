@@ -6,7 +6,7 @@ COPY packages/contracts /tmp/contracts
 RUN pip install --no-cache-dir /tmp/contracts && rm -rf /tmp/contracts
 
 COPY backend/services/catalog/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --default-timeout=1000 --no-cache-dir -r requirements.txt
 
 COPY backend/services/catalog/app ./app
 

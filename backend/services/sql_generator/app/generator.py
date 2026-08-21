@@ -24,7 +24,7 @@ def _get_llm():
         max_retries=2
     )
 
-def generate_sql(query: str, schema: dict[str, Any]) -> SqlDraft:
+def generate_sql(query: str, semantic_plan: dict[str, Any], schema: dict[str, Any]) -> SqlDraft:
     """Generate a SQL query based on natural language and a database schema."""
     llm = _get_llm()
     structured_llm = llm.with_structured_output(SqlDraft)
@@ -36,6 +36,7 @@ def generate_sql(query: str, schema: dict[str, Any]) -> SqlDraft:
     try:
         result = chain.invoke({
             "schema_context": schema_str,
+            "semantic_plan": str(semantic_plan),
             "question": query
         })
         return result

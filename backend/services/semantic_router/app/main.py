@@ -1,19 +1,19 @@
 """Semantic Router Service.
 
 Analyzes user queries to determine intent and find relevant data schemas.
-Currently uses mocked logic to validate the architecture before integrating LLMs.
 """
 
 from fastapi import HTTPException
 from pydantic import BaseModel
+from typing import Any, List, Optional
 
 from contracts.service_factory import create_service_app
 
 try:
-    from app.router import classify_intent, RouteResult
+    from app.router import create_semantic_plan, SemanticPlanOut
     from app.catalog import search_catalog, CatalogSearchResult
 except ImportError:
-    from backend.services.semantic_router.app.router import classify_intent, RouteResult
+    from backend.services.semantic_router.app.router import create_semantic_plan, SemanticPlanOut
     from backend.services.semantic_router.app.catalog import search_catalog, CatalogSearchResult
 
 
@@ -22,8 +22,10 @@ app = create_service_app(service_name="semantic_router")
 
 # ── Request Models ───────────────────────────────────────────────
 
-class RouteRequest(BaseModel):
+class PlanRequest(BaseModel):
     query: str
+    context: dict = {}
+    chat_history: List[dict] = []
 
 class CatalogSearchRequest(BaseModel):
     query: str
@@ -32,13 +34,14 @@ class CatalogSearchRequest(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────
 
-@app.post("/internal/route", response_model=RouteResult)
-async def route_query(body: RouteRequest) -> RouteResult:
-    """Classify the intent of the user's query."""
+@app.post("/internal/plan", response_model=SemanticPlanOut)
+async def plan_query(body: PlanRequest) -> SemanticPlanOut:
+    """Classify intent and generate semantic plan."""
     if not body.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
         
-    return classify_intent(body.query)
+    result_dict = create_semantic_plan(body.query, body.context, body.chat_history)
+    return SemanticPlanOut(**result_dict)
 
 
 @app.post("/internal/catalog/search", response_model=CatalogSearchResult)

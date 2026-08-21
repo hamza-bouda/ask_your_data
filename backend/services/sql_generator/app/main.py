@@ -25,6 +25,7 @@ app = create_service_app(service_name="sql_generator")
 
 class GenerateSqlRequest(BaseModel):
     query: str
+    semantic_plan: dict[str, Any]
     schema_definition: dict[str, Any]
 
 class RepairSqlRequest(BaseModel):
@@ -45,7 +46,7 @@ async def generate_sql_endpoint(body: GenerateSqlRequest) -> SqlDraft:
     if not body.schema_definition:
         raise HTTPException(status_code=400, detail="Schema definition cannot be empty")
         
-    return generate_sql(query=body.query, schema=body.schema_definition)
+    return generate_sql(query=body.query, semantic_plan=body.semantic_plan, schema=body.schema_definition)
 
 @app.post("/internal/repair-sql", response_model=SqlDraft)
 async def repair_sql_endpoint(body: RepairSqlRequest) -> SqlDraft:

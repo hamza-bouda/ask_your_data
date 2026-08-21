@@ -17,12 +17,11 @@ class ChartType(StrEnum):
     LINE = "line"
     BAR = "bar"
     PIE = "pie"
-    SCATTER = "scatter"
-    AREA = "area"
+    METRIC = "metric"
 
 
 class ChartSpec(BaseModel):
-    """Specification consumed by the frontend to render a Plotly chart.
+    """Specification consumed by the frontend to render a chart.
 
     Built deterministically by the Visualization service — no LLM
     involved in choosing the chart type.
@@ -36,23 +35,27 @@ class ChartSpec(BaseModel):
         default="",
         description="Human-readable chart title.",
     )
-    x_axis: str | None = Field(
+    x_field: str | None = Field(
         default=None,
-        description="Column name mapped to the x axis.",
+        description="Column name mapped to the x axis or label.",
     )
-    y_axis: str | None = Field(
+    y_field: str | None = Field(
         default=None,
-        description="Column name mapped to the y axis.",
+        description="Column name mapped to the y axis or value.",
     )
-    series: list[str] = Field(
+    series_field: str | None = Field(
+        default=None,
+        description="Column name used to group data into multiple series.",
+    )
+    aggregation: str | None = Field(
+        default=None,
+        description="Aggregation applied (e.g. sum, count) if applicable.",
+    )
+    reason: str = Field(
+        default="",
+        description="Short justification of the recommended visualization.",
+    )
+    warnings: list[str] = Field(
         default_factory=list,
-        description="Column names for multi-series charts.",
-    )
-    data: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Row-oriented result data.",
-    )
-    options: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Extra Plotly layout/config options.",
+        description="Warnings about granularity, volume, missing values, etc.",
     )

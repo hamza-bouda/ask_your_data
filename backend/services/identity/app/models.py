@@ -79,3 +79,14 @@ class AuthAudit(Base):
         default=lambda: datetime.now(timezone.utc),
         index=True,
     )
+
+
+class User(Base):
+    """User account for the application."""
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True) # UUID or username
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    password: Mapped[str] = mapped_column(String(100), nullable=False)
+
