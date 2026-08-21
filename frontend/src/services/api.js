@@ -39,6 +39,11 @@ export const getConversation = async (id) => {
   return response.data;
 };
 
+export const getResults = async (offset = 0, limit = 50) => {
+  const response = await api.get('/v1/results', { params: { offset, limit } });
+  return response.data;
+};
+
 export const getRun = async (runId) => {
   const response = await api.get(`/v1/runs/${runId}`);
   return response.data;

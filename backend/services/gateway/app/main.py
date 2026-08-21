@@ -352,6 +352,29 @@ async def get_run(
         raise HTTPException(status_code=exc.response.status_code, detail="Orchestrator error")
 
 
+@app.get("/v1/results")
+async def list_results(
+    request: Request,
+    offset: int = 0,
+    limit: int = 50,
+    context: TenantContext = Depends(get_tenant_context),
+):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{ORCHESTRATOR_URL}/internal/results",
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id, "offset": offset, "limit": limit},
+                headers={"X-Correlation-ID": request.state.correlation_id},
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Orchestrator unavailable")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail="Orchestrator error")
+
+
 # ── Admin Datasource Endpoints ─────────────────────────────────
 class PolicyUpdateRequest(BaseModel):
     is_allowed: bool
