@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime
 from typing import List, Optional
 from fastapi import Request, Depends, HTTPException, Body
@@ -12,7 +13,7 @@ from contracts.service_factory import create_service_app
 from observability import setup_logging, setup_tracing, setup_metrics
 
 from app.database import get_db, create_tables
-from app.models import TenantDatabase, TableSchema, ColumnSchema, AdminAudit, SemanticMetric, SemanticSynonym, CatalogDocument
+from app.models import DataSource, TenantDatabase, TableSchema, ColumnSchema, AdminAudit, SemanticMetric, SemanticSynonym, CatalogDocument
 
 app = create_service_app(service_name="catalog")
 
@@ -62,6 +63,26 @@ def log_audit(db: Session, tenant_id: str, user_id: str, action: str, target: st
     # Don't commit here, let the caller commit the transaction
 
 
+def source_from_request(db: Session, request: Request, *, active_only: bool = False) -> DataSource:
+    """Resolve a tenant-owned datasource, requiring an explicit choice when needed."""
+    tenant_id = request.headers.get("x-tenant-id", "acme")
+    source_id = request.headers.get("x-source-id")
+    query = db.query(DataSource).filter(DataSource.tenant_id == tenant_id)
+    if active_only:
+        query = query.filter(DataSource.status == "active")
+    if source_id:
+        source = query.filter(DataSource.id == source_id).first()
+        if not source:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+        return source
+    sources = query.order_by(DataSource.created_at.asc()).limit(2).all()
+    if not sources:
+        raise HTTPException(status_code=404, detail="Source not registered")
+    if len(sources) > 1:
+        raise HTTPException(status_code=409, detail="Select a datasource before continuing")
+    return sources[0]
+
+
 def refresh_table_document_policy(db: Session, table: TableSchema) -> None:
     """Keep the RAG representation aligned with table and column policies.
 
@@ -76,7 +97,7 @@ def refresh_table_document_policy(db: Session, table: TableSchema) -> None:
     document = (
         db.query(CatalogDocument)
         .filter(
-            CatalogDocument.tenant_id == table.tenant_id,
+            CatalogDocument.source_id == table.source_id,
             CatalogDocument.doc_type == "table",
             CatalogDocument.metadata_json.op("->>")("table_name") == table.table_name,
         )
@@ -100,10 +121,13 @@ def refresh_table_document_policy(db: Session, table: TableSchema) -> None:
 
 class RegisterRequest(BaseModel):
     connection_string: str
+    name: Optional[str] = None
+    source_id: Optional[str] = None
 
 class SearchRequest(BaseModel):
     query: str
     tenant_id: str
+    source_id: Optional[str] = None
     top_k: int = 5
 
 class PolicyUpdateRequest(BaseModel):
@@ -128,28 +152,50 @@ def register_database(body: RegisterRequest, request: Request, db: Session = Dep
     # 2. Store encrypted connection string
     encrypted_conn_str = encrypt_secret(body.connection_string)
     dialect = target_engine.dialect.name
+
+    # Child catalog tables still retain their legacy tenant foreign key during
+    # the additive migration. Ensure that compatibility parent exists for a
+    # brand-new tenant while all source-aware operations use ``DataSource``.
+    if not db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id).first():
+        db.add(TenantDatabase(
+            tenant_id=tenant_id, connection_string=encrypted_conn_str,
+            name=f"Database for {tenant_id}", dialect=dialect,
+            status="active", is_allowed=True,
+        ))
     
-    db_record = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id).first()
+    db_record = None
+    if body.source_id:
+        db_record = db.query(DataSource).filter(
+            DataSource.id == body.source_id, DataSource.tenant_id == tenant_id
+        ).first()
+        if not db_record:
+            raise HTTPException(status_code=404, detail="Datasource not found")
+    elif not body.name:
+        # Preserve the old single-source registration behaviour for existing
+        # clients while allowing named registrations to create extra sources.
+        existing = db.query(DataSource).filter(DataSource.tenant_id == tenant_id).limit(2).all()
+        if len(existing) == 1:
+            db_record = existing[0]
+
     if not db_record:
-        db_record = TenantDatabase(
-            tenant_id=tenant_id, 
-            connection_string=encrypted_conn_str,
-            dialect=dialect,
-            name=f"Database for {tenant_id}",
-            status="registered",
-            is_allowed=True
+        db_record = DataSource(
+            id=str(uuid.uuid4()), tenant_id=tenant_id,
+            connection_string=encrypted_conn_str, dialect=dialect,
+            name=(body.name or f"Database for {tenant_id}"), status="registered",
+            is_allowed=True,
         )
         db.add(db_record)
     else:
         db_record.connection_string = encrypted_conn_str
         db_record.dialect = dialect
+        db_record.name = body.name or db_record.name
         db_record.status = "registered"
         db_record.is_allowed = True
         
-    log_audit(db, tenant_id, user_id, "register_source", "source", correlation_id)
+    log_audit(db, tenant_id, user_id, "register_source", f"source:{db_record.id}", correlation_id)
     db.commit()
     
-    return {"status": "success", "message": "Database registered successfully"}
+    return {"status": "success", "message": "Database registered successfully", "id": db_record.id}
 
 @app.post("/api/v1/catalog/sync")
 def sync_database(request: Request, db: Session = Depends(get_db)):
@@ -159,9 +205,7 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
     user_id = request.headers.get("x-user-id", "system")
     correlation_id = request.headers.get("x-correlation-id")
     
-    db_record = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id).first()
-    if not db_record:
-        raise HTTPException(status_code=404, detail="Source not registered")
+    db_record = source_from_request(db, request)
         
     try:
         conn_string = decrypt_secret(db_record.connection_string)
@@ -176,7 +220,7 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
     db_record.catalog_version += 1
     current_version = db_record.catalog_version
 
-    existing_tables = db.query(TableSchema).filter(TableSchema.tenant_id == tenant_id).all()
+    existing_tables = db.query(TableSchema).filter(TableSchema.source_id == db_record.id).all()
     existing_tables_map = {t.table_name: t for t in existing_tables}
     
     # Mark all existing as unavailable initially, we will mark them true if they still exist
@@ -207,6 +251,7 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
         else:
             t_record = TableSchema(
                 tenant_id=tenant_id,
+                source_id=db_record.id,
                 table_name=table_name,
                 description=desc,
                 primary_key=pk_str,
@@ -261,13 +306,14 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
         # We store one document per table version, or overwrite the old one
         # To avoid duplicating, we delete old documents for this table
         db.query(CatalogDocument).filter(
-            CatalogDocument.tenant_id == tenant_id, 
+            CatalogDocument.source_id == db_record.id,
             CatalogDocument.doc_type == "table",
             CatalogDocument.metadata_json.op("->>")("table_name") == table_name
         ).delete(synchronize_session=False)
         
         doc = CatalogDocument(
             tenant_id=tenant_id,
+            source_id=db_record.id,
             doc_type="table",
             content=doc_content,
             metadata_json={"table_name": table_name, "columns": col_names},
@@ -280,7 +326,7 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
     db_record.status = "active"
     db_record.last_synced_at = datetime.utcnow()
     
-    log_audit(db, tenant_id, user_id, "sync_source", "source", correlation_id)
+    log_audit(db, tenant_id, user_id, "sync_source", f"source:{db_record.id}", correlation_id)
     db.commit()
     
     return {"status": "success", "tables_indexed": len(table_names), "last_synced_at": db_record.last_synced_at.isoformat(), "catalog_version": current_version}
@@ -296,8 +342,10 @@ def create_metric(body: SemanticMetricRequest, request: Request, db: Session = D
     user_id = request.headers.get("x-user-id", "system")
     correlation_id = request.headers.get("x-correlation-id")
     
+    source = source_from_request(db, request)
     metric = SemanticMetric(
         tenant_id=tenant_id,
+        source_id=source.id,
         name=body.name,
         description=body.description,
         sql_expression=body.sql_expression
@@ -311,6 +359,7 @@ def create_metric(body: SemanticMetricRequest, request: Request, db: Session = D
     
     doc = CatalogDocument(
         tenant_id=tenant_id,
+        source_id=source.id,
         doc_type="metric",
         content=doc_content,
         metadata_json={"metric_id": metric.id, "name": metric.name},
@@ -325,8 +374,8 @@ def create_metric(body: SemanticMetricRequest, request: Request, db: Session = D
 
 @app.get("/api/v1/catalog/metrics")
 def get_metrics(request: Request, db: Session = Depends(get_db)):
-    tenant_id = request.headers.get("x-tenant-id", "acme")
-    metrics = db.query(SemanticMetric).filter(SemanticMetric.tenant_id == tenant_id, SemanticMetric.is_active == True).all()
+    source = source_from_request(db, request)
+    metrics = db.query(SemanticMetric).filter(SemanticMetric.source_id == source.id, SemanticMetric.is_active == True).all()
     return {"metrics": [{"id": m.id, "name": m.name, "description": m.description, "sql_expression": m.sql_expression} for m in metrics]}
 
 
@@ -338,7 +387,8 @@ def update_table_policy(table_id: int, body: PolicyUpdateRequest, request: Reque
     user_id = request.headers.get("x-user-id", "system")
     correlation_id = request.headers.get("x-correlation-id")
     
-    table = db.query(TableSchema).filter(TableSchema.id == table_id, TableSchema.tenant_id == tenant_id).first()
+    source = source_from_request(db, request)
+    table = db.query(TableSchema).filter(TableSchema.id == table_id, TableSchema.source_id == source.id).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
         
@@ -359,7 +409,8 @@ def update_column_policy(column_id: int, body: PolicyUpdateRequest, request: Req
     correlation_id = request.headers.get("x-correlation-id")
     
     # Needs to join to verify tenant
-    column = db.query(ColumnSchema).join(TableSchema).filter(ColumnSchema.id == column_id, TableSchema.tenant_id == tenant_id).first()
+    source = source_from_request(db, request)
+    column = db.query(ColumnSchema).join(TableSchema).filter(ColumnSchema.id == column_id, TableSchema.source_id == source.id).first()
     if not column:
         raise HTTPException(status_code=404, detail="Column not found")
         
@@ -398,7 +449,12 @@ def search_catalog(body: SearchRequest, db: Session = Depends(get_db)):
     from app.models import CatalogDocument
     from sqlalchemy import or_
     
-    tenant_db = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == body.tenant_id).first()
+    query_sources = db.query(DataSource).filter(DataSource.tenant_id == body.tenant_id)
+    if body.source_id:
+        tenant_db = query_sources.filter(DataSource.id == body.source_id).first()
+    else:
+        sources = query_sources.limit(2).all()
+        tenant_db = sources[0] if len(sources) == 1 else None
     if not tenant_db or not tenant_db.is_allowed:
         return {"results": []}
 
@@ -406,7 +462,7 @@ def search_catalog(body: SearchRequest, db: Session = Depends(get_db)):
     
     # Simple semantic search on CatalogDocument (policy enforced via is_allowed == True)
     query = db.query(CatalogDocument).filter(
-        CatalogDocument.tenant_id == body.tenant_id,
+        CatalogDocument.source_id == tenant_db.id,
         CatalogDocument.is_allowed == True
     )
     
@@ -430,17 +486,10 @@ def search_catalog(body: SearchRequest, db: Session = Depends(get_db)):
         
     return {"results": results}
 
-@app.get("/api/v1/catalog/source")
-def get_source_status(request: Request, db: Session = Depends(get_db)):
-    """Get the current connected database status for the tenant without secrets."""
-    tenant_id = request.headers.get("x-tenant-id", "acme")
-    db_record = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id).first()
-    if not db_record:
-        return {"connected": False, "table_count": 0, "id": None}
-    
-    table_count = db.query(TableSchema).filter(TableSchema.tenant_id == tenant_id).count()
+def serialize_source(db: Session, db_record: DataSource) -> dict:
+    table_count = db.query(TableSchema).filter(TableSchema.source_id == db_record.id).count()
     return {
-        "id": db_record.tenant_id,
+        "id": db_record.id,
         "connected": True, 
         "table_count": table_count,
         "name": db_record.name,
@@ -450,13 +499,32 @@ def get_source_status(request: Request, db: Session = Depends(get_db)):
         "last_synced_at": db_record.last_synced_at.isoformat() if db_record.last_synced_at else None
     }
 
+
+@app.get("/api/v1/catalog/sources")
+def list_sources(request: Request, db: Session = Depends(get_db)):
+    """List tenant-owned source metadata without ever exposing credentials."""
+    tenant_id = request.headers.get("x-tenant-id", "acme")
+    sources = db.query(DataSource).filter(DataSource.tenant_id == tenant_id).order_by(DataSource.created_at.asc()).all()
+    return {"sources": [serialize_source(db, source) for source in sources]}
+
+
+@app.get("/api/v1/catalog/source")
+def get_source_status(request: Request, db: Session = Depends(get_db)):
+    """Compatibility endpoint returning the selected or only datasource."""
+    try:
+        return serialize_source(db, source_from_request(db, request))
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return {"connected": False, "table_count": 0, "id": None}
+        raise
+
 @app.get("/api/v1/catalog/tables")
 def get_tables(request: Request, db: Session = Depends(get_db)):
     """Get tables and columns. Filters disallowed entities based on is_admin header."""
-    tenant_id = request.headers.get("x-tenant-id", "acme")
+    source = source_from_request(db, request)
     is_admin = request.headers.get("x-is-admin", "false").lower() == "true"
     
-    tables = db.query(TableSchema).filter(TableSchema.tenant_id == tenant_id).all()
+    tables = db.query(TableSchema).filter(TableSchema.source_id == source.id).all()
     
     results = []
     for t in tables:
@@ -499,10 +567,10 @@ def get_tables(request: Request, db: Session = Depends(get_db)):
 @app.get("/api/v1/catalog/tables/{table_name}/preview")
 def preview_table(table_name: str, request: Request, limit: int = 10, db: Session = Depends(get_db)):
     """Read a bounded preview using only currently allowed table columns."""
-    tenant_id = request.headers.get("x-tenant-id", "acme")
+    source = source_from_request(db, request, active_only=True)
     table = (
         db.query(TableSchema)
-        .filter(TableSchema.tenant_id == tenant_id, TableSchema.table_name == table_name,
+        .filter(TableSchema.source_id == source.id, TableSchema.table_name == table_name,
                 TableSchema.is_allowed.is_(True), TableSchema.is_available.is_(True))
         .first()
     )
@@ -511,9 +579,6 @@ def preview_table(table_name: str, request: Request, limit: int = 10, db: Sessio
     columns = [c.column_name for c in table.columns if c.is_allowed and c.is_available]
     if not columns:
         raise HTTPException(status_code=403, detail="No columns allowed for preview")
-    source = db.query(TenantDatabase).filter(TenantDatabase.tenant_id == tenant_id, TenantDatabase.status == "active").first()
-    if not source:
-        raise HTTPException(status_code=409, detail="Datasource is not ready")
     quote = lambda identifier: '"' + identifier.replace('"', '""') + '"'
     sql = f"SELECT {', '.join(quote(column) for column in columns)} FROM {quote(table.table_name)} LIMIT :limit"
     try:

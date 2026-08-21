@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, JSON, Integer, ForeignKey, Boolean, DateTime
+from sqlalchemy import String, JSON, Integer, ForeignKey, Boolean, DateTime, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 from .database import Base
@@ -22,12 +22,38 @@ class TenantDatabase(Base):
     documents = relationship("CatalogDocument", back_populates="database", cascade="all, delete-orphan")
     metrics = relationship("SemanticMetric", back_populates="database", cascade="all, delete-orphan")
 
+
+class DataSource(Base):
+    """A governed physical datasource owned by a tenant.
+
+    ``TenantDatabase`` is kept as the legacy one-source table so existing local
+    deployments can upgrade in place. New source-aware code reads this model;
+    a startup migration creates one source per legacy tenant record.
+    """
+    __tablename__ = "data_sources"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    connection_string: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    dialect: Mapped[str] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="registered")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    is_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    catalog_version: Mapped[int] = mapped_column(Integer, default=1)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_data_sources_tenant_name"),
+    )
+
 class TableSchema(Base):
     """Stores introspection and metadata for a single table."""
     __tablename__ = "tables"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(100), ForeignKey("tenant_databases.tenant_id"))
+    source_id: Mapped[str] = mapped_column(String(36), index=True, nullable=True)
     table_name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=True)
     is_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -72,6 +98,7 @@ class CatalogDocument(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(100), ForeignKey("tenant_databases.tenant_id"))
+    source_id: Mapped[str] = mapped_column(String(36), index=True, nullable=True)
     doc_type: Mapped[str] = mapped_column(String(50), nullable=False) # table, column_group, relation, metric, synonym
     content: Mapped[str] = mapped_column(String, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, nullable=True)
@@ -88,6 +115,7 @@ class SemanticMetric(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(100), ForeignKey("tenant_databases.tenant_id"))
+    source_id: Mapped[str] = mapped_column(String(36), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=True)
     sql_expression: Mapped[str] = mapped_column(String, nullable=False)
@@ -102,6 +130,7 @@ class SemanticSynonym(Base):
     
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(100), ForeignKey("tenant_databases.tenant_id"))
+    source_id: Mapped[str] = mapped_column(String(36), index=True, nullable=True)
     term: Mapped[str] = mapped_column(String(200), nullable=False)
     synonyms: Mapped[str] = mapped_column(String, nullable=False) # comma-separated
     target_object: Mapped[str] = mapped_column(String(200), nullable=True) # e.g. table.column

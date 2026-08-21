@@ -49,6 +49,7 @@ def create_tables():
             "foreign_keys JSON",
             "indices JSON",
             "catalog_version INTEGER DEFAULT 1",
+            "source_id VARCHAR(36)",
         ],
         "columns": [
             "is_allowed BOOLEAN DEFAULT FALSE",
@@ -56,6 +57,15 @@ def create_tables():
             "last_modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
             "modified_by VARCHAR(100)",
             "is_nullable BOOLEAN DEFAULT TRUE",
+        ],
+        "catalog_documents": [
+            "source_id VARCHAR(36)",
+        ],
+        "semantic_metrics": [
+            "source_id VARCHAR(36)",
+        ],
+        "semantic_synonyms": [
+            "source_id VARCHAR(36)",
         ],
     }
     with engine.begin() as conn:
@@ -68,3 +78,22 @@ def create_tables():
                         f"ADD COLUMN IF NOT EXISTS {column_name} {column[len(column_name):].strip()}"
                     )
                 )
+
+        # Move the original one-source-per-tenant entries into the new
+        # multi-source table. The legacy tenant id is deliberately reused as
+        # the source id so every old catalog row can be backfilled atomically.
+        conn.execute(text("""
+            INSERT INTO data_sources
+                (id, tenant_id, connection_string, name, dialect, status,
+                 created_at, last_synced_at, is_allowed, catalog_version)
+            SELECT tenant_id, tenant_id, connection_string,
+                   COALESCE(name, 'Database for ' || tenant_id), dialect,
+                   COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP),
+                   last_synced_at, COALESCE(is_allowed, FALSE), COALESCE(catalog_version, 1)
+            FROM tenant_databases
+            ON CONFLICT (id) DO NOTHING
+        """))
+        for table_name in ("tables", "catalog_documents", "semantic_metrics", "semantic_synonyms"):
+            conn.execute(text(
+                f"UPDATE {table_name} SET source_id = tenant_id WHERE source_id IS NULL"
+            ))
