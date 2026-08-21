@@ -1,17 +1,18 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
 import AppLayout from './components/layout/AppLayout';
 
-// Pages
-import ConversationsPage from './pages/ConversationsPage';
-import DataExplorerPage from './pages/DataExplorerPage';
-import ResultsPage from './pages/ResultsPage';
-import DataSourcesPage from './pages/DataSourcesPage';
-import AdminDataPage from './pages/AdminDataPage';
-import ProfilePage from './pages/ProfilePage';
-import DashboardsPage from './pages/DashboardsPage';
-import DashboardDetailPage from './pages/DashboardDetailPage';
+// Keep analytics-heavy pages out of the first paint. Recharts is then loaded
+// only when the user opens a conversation, result, or dashboard.
+const ConversationsPage = lazy(() => import('./pages/ConversationsPage'));
+const DataExplorerPage = lazy(() => import('./pages/DataExplorerPage'));
+const ResultsPage = lazy(() => import('./pages/ResultsPage'));
+const DataSourcesPage = lazy(() => import('./pages/DataSourcesPage'));
+const AdminDataPage = lazy(() => import('./pages/AdminDataPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const DashboardsPage = lazy(() => import('./pages/DashboardsPage'));
+const DashboardDetailPage = lazy(() => import('./pages/DashboardDetailPage'));
 
 import './App.css';
 
@@ -23,7 +24,8 @@ const PrivateRoute = ({ children }) => {
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <Suspense fallback={<div className="app-route-loader" role="status">Chargement de l’espace de travail…</div>}>
+        <Routes>
         <Route path="/login" element={<Login />} />
         
         <Route path="/" element={<PrivateRoute><AppLayout /></PrivateRoute>}>
@@ -37,7 +39,8 @@ function App() {
           <Route path="admin/data" element={<AdminDataPage />} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
-      </Routes>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }
