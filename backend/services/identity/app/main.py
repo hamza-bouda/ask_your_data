@@ -51,7 +51,21 @@ def on_startup() -> None:
     db = SessionLocal()
     if not db.query(User).filter(User.username == "hamza").first():
         db.add(User(id="hamza", tenant_id="acme", username="hamza", password="password"))
-        db.commit()
+    # Keep the local demo usable without recreating the insecure gateway
+    # fallback. This data is never seeded when local auth is disabled.
+    if not db.query(TenantPolicy).filter(
+        TenantPolicy.tenant_id == "acme", TenantPolicy.role_name == "admin"
+    ).first():
+        db.add(TenantPolicy(
+            tenant_id="acme", role_name="admin",
+            permissions=["query", "view_catalog", "manage_catalog"],
+        ))
+    if not db.query(RoleBinding).filter(
+        RoleBinding.tenant_id == "acme", RoleBinding.user_id == "hamza",
+        RoleBinding.role_name == "admin",
+    ).first():
+        db.add(RoleBinding(tenant_id="acme", user_id="hamza", role_name="admin"))
+    db.commit()
     db.close()
 
 
@@ -290,7 +304,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> dict:
         from backend.services.identity.app.dev_tokens import create_dev_token
 
     # Find roles
-    bindings = db.query(RoleBinding).filter(RoleBinding.user_id == user.id).all()
+    bindings = db.query(RoleBinding).filter(
+        RoleBinding.user_id == user.id,
+        RoleBinding.tenant_id == user.tenant_id,
+    ).all()
     roles = [b.role_name for b in bindings]
     if not roles:
         roles = ["analyst"] # default role
@@ -301,5 +318,13 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> dict:
         roles=roles,
         expires_in_minutes=1440, # 24 hours
     )
-    return {"token": token, "user": {"id": user.id, "username": user.username, "tenant_id": user.tenant_id}}
+    return {
+        "token": token,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "tenant_id": user.tenant_id,
+            "roles": roles,
+        },
+    }
 

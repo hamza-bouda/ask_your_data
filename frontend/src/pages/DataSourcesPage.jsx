@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Link, CheckCircle, PlusCircle, RefreshCw } from 'lucide-react';
-import { registerDatabase, getDataSource } from '../services/api';
+import { registerDatabase, getDataSource, syncAdminDatasource } from '../services/api';
 
 export default function DataSourcesPage() {
   const [connectionString, setConnectionString] = useState('postgresql://askyourdata:askyourdata_dev@postgres:5432/askyourdata');
@@ -32,10 +32,11 @@ export default function DataSourcesPage() {
     setError(null);
     try {
       await registerDatabase(connectionString);
+      await syncAdminDatasource('primary');
       setShowForm(false);
       await fetchSourceStatus();
     } catch (err) {
-      setError("Impossible de se connecter à la base de données. Assurez-vous que l'URL est correcte.");
+      setError("Impossible de connecter et synchroniser la base. Vérifiez l'URL et vos droits administrateur.");
     } finally {
       setIsLoading(false);
     }
