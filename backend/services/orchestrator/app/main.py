@@ -112,6 +112,7 @@ class ResultsResponse(BaseModel):
 class RunResponse(BaseModel):
     run_id: str
     conversation_id: str | None = None
+    final_message_id: str | None = None
     status: str
     events_url: str | None = None
     results: Optional[list[dict[str, Any]]] = None
@@ -356,6 +357,7 @@ async def get_run_status(run_id: str, tenant_id: str, user_id: str, db: Session 
     response_data = RunResponse(
         run_id=run_id,
         conversation_id=run.conversation_id,
+        final_message_id=run.final_message_id,
         status=run.status,
         error_message=run.error_message
     )

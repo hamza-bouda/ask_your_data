@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare } from 'lucide-react';
+import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare, Save } from 'lucide-react';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import DebugPanel from '../components/DebugPanel';
+import SaveToDashboardDialog from '../components/SaveToDashboardDialog';
 import { getConversations, createConversation, getConversation, getRun, sendMessage, streamRunEvents, waitForRun } from '../services/api';
 
 export default function ConversationsPage() {
@@ -14,6 +15,7 @@ export default function ConversationsPage() {
   const [debugData, setDebugData] = useState(null);
   const [showDebug, setShowDebug] = useState(true);
   const [runStage, setRunStage] = useState(null);
+  const [savingMessage, setSavingMessage] = useState(null);
   
   const messagesEndRef = useRef(null);
   const hasDataResult = (message) => (
@@ -34,6 +36,7 @@ export default function ConversationsPage() {
     try {
       const data = await getConversation(id);
       const formattedMessages = data.messages.map(msg => ({
+        id: msg.id,
         role: msg.role === 'ai' ? 'assistant' : msg.role,
         content: msg.content,
         payload: msg.payload
@@ -153,6 +156,7 @@ export default function ConversationsPage() {
       };
       
       const aiMessage = {
+        id: response.final_message_id,
         role: 'assistant',
         content: response.response || "Voici les résultats de votre requête.",
         payload: payload
@@ -236,6 +240,7 @@ export default function ConversationsPage() {
               
               {hasDataResult(msg) && (
                 <div className="chat-result-container">
+                  {msg.id && <div className="chat-result-actions"><button className="btn-secondary" onClick={() => setSavingMessage({ id: msg.id, title: msg.payload.chart_spec?.title || 'Résultat de conversation' })}><Save size={16} /> Sauvegarder</button></div>}
                   <ChartRenderer 
                     data={msg.payload.results} 
                     intent={msg.payload.semantic_plan?.intent || 'DATA_QUERY'}
@@ -300,6 +305,7 @@ export default function ConversationsPage() {
           error={debugData.error} 
         />
       )}
+      {savingMessage && <SaveToDashboardDialog messageId={savingMessage.id} title={savingMessage.title} onClose={() => setSavingMessage(null)} />}
     </div>
   );
 }

@@ -823,6 +823,7 @@ code {
 .result-list-item span, .result-list-item time { color: var(--text-muted); font-size: .75rem; }
 .results-detail-card { overflow-y: auto; padding: 22px; }
 .results-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.result-header-actions, .chat-result-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .results-detail-header h2 { font-size: 1.3rem; margin-bottom: 5px; }
 .results-detail-header p { color: var(--text-muted); font-size: .88rem; }
 .result-sql { margin-top: 28px; }
@@ -1181,6 +1182,20 @@ code {
   padding: 16px;
   border: 1px solid var(--border-color);
 }
+.chat-result-actions { justify-content: flex-end; margin-bottom: 12px; }
+
+.dialog-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(2, 6, 23, .7); }
+.save-dashboard-dialog { width: min(100%, 500px); padding: 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, .42); }
+.save-dashboard-dialog > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 22px; }
+.save-dashboard-dialog h2 { font-size: 1.15rem; margin-bottom: 5px; }
+.save-dashboard-dialog header p, .dialog-status { color: var(--text-muted); font-size: .9rem; }
+.save-dashboard-dialog form { display: grid; gap: 18px; }
+.save-dashboard-dialog form > label { display: grid; gap: 7px; color: var(--text-muted); font-size: .9rem; font-weight: 600; }
+.save-dashboard-dialog select, .save-dashboard-dialog input { width: 100%; padding: 10px 12px; color: var(--text-main); border: 1px solid var(--border-color); border-radius: 8px; background: rgba(15, 23, 42, .55); font: inherit; }
+.save-dashboard-dialog select:focus, .save-dashboard-dialog input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+.save-dashboard-dialog footer { display: flex; justify-content: flex-end; gap: 10px; }
+.dialog-success { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; color: #86efac; }
+.dialog-success p { margin-top: 3px; color: var(--text-muted); font-size: .88rem; }
 
 .chat-result-container table,
 .dashboard-item-card table {
