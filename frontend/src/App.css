@@ -1123,6 +1123,30 @@ code {
   border: 1px solid var(--border-color);
 }
 
+.chat-result-container table,
+.dashboard-item-card table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .86rem;
+}
+
+.chat-result-container th,
+.chat-result-container td,
+.dashboard-item-card th,
+.dashboard-item-card td {
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chat-result-container th,
+.dashboard-item-card th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: rgba(255, 255, 255, .025);
+}
+
 .clarification-options {
   display: flex;
   flex-direction: column;
