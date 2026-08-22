@@ -2,17 +2,20 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { MessageSquare, Database, LayoutDashboard, Settings, HardDrive, LogOut, Plug, PanelsTopLeft } from 'lucide-react';
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen = false, onNavigate = () => {} }) {
   const navigate = useNavigate();
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('activeSourceId');
+    onNavigate();
     navigate('/login');
   };
 
   const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
+  let user = null;
+  try { user = userStr ? JSON.parse(userStr) : null; } catch { user = null; }
   const isAdmin = user && user.roles && user.roles.includes('admin');
 
   const navItems = [
@@ -28,7 +31,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="app-sidebar">
+    <aside className={`app-sidebar ${isOpen ? 'open' : ''}`}>
       <div className="sidebar-header">
         <h2>AskYourData</h2>
       </div>
@@ -38,6 +41,7 @@ export default function Sidebar() {
             key={item.to} 
             to={item.to} 
             className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            onClick={onNavigate}
           >
             <item.icon size={20} />
             <span>{item.label}</span>
@@ -45,7 +49,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="sidebar-footer">
-        <NavLink to="/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+        <NavLink to="/profile" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={onNavigate}>
           <Settings size={20} />
           <span>Profil & Paramètres</span>
         </NavLink>
