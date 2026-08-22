@@ -102,9 +102,6 @@ def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
     if os.getenv("LLM_PROVIDER", "").lower() == "mock":
         return _mock_semantic_plan(query, context)
 
-    llm = _get_llm()
-    structured_llm = llm.with_structured_output(SemanticPlanOut)
-    
     system_msg = (
         "You are a semantic router for a BI conversational agent. "
         "Your job is to classify the user's query into one of the following intents:\n"
@@ -124,9 +121,10 @@ def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
         ("human", "Context: {context}\n\nHistory: {history}\n\nQuery: {query}")
     ])
     
-    chain = prompt | structured_llm
-    
     try:
+        llm = _get_llm()
+        structured_llm = llm.with_structured_output(SemanticPlanOut)
+        chain = prompt | structured_llm
         result = chain.invoke({
             "query": query, 
             "context": str(context), 
@@ -135,4 +133,10 @@ def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
         return result.model_dump()
     except Exception as e:
         print(f"Error creating semantic plan: {e}")
-        return {"intent": "DATA_QUERY", "confidence": 0.0}
+        # A routing failure must never turn into an ungrounded SQL attempt.
+        return {
+            "intent": "AMBIGUOUS",
+            "confidence": 0.0,
+            "clarification_options": ["Réessayez votre question dans quelques instants."],
+            "reasoning": "Semantic routing is temporarily unavailable.",
+        }
