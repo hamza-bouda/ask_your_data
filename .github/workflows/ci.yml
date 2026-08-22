@@ -59,6 +59,11 @@ jobs:
             requirements: backend/services/sql_generator/requirements.txt
             tests: backend/services/sql_generator/tests
             pythonpath: ${{ github.workspace }}/backend/services/sql_generator:${{ github.workspace }}
+          - name: Orchestrator dashboards and exports
+            requirements: backend/services/orchestrator/requirements.txt
+            tests: tests/orchestrator
+            pythonpath: ${{ github.workspace }}
+            testing: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,6 +77,7 @@ jobs:
       - name: Run deterministic service tests
         env:
           PYTHONPATH: ${{ matrix.pythonpath }}
+          TESTING: ${{ matrix.testing }}
         run: python -m pytest -q ${{ matrix.tests }}
 
   compose:
