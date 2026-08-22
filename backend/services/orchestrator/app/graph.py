@@ -69,7 +69,7 @@ def plan_node(state: ConversationState) -> dict:
                 return {
                     "status": "unrelated",
                     "semantic_plan": data,
-                    "results": [{"response": "Bonjour ! Je suis AskYourData, votre assistant BI. Posez-moi une question sur vos données !"}]
+                    "results": [{"response": "Je peux vous aider à explorer les données autorisées, créer une analyse ou un graphique. Par exemple : « liste les tables disponibles »."}]
                 }
 
             if intent == "CATALOG_QUERY":
