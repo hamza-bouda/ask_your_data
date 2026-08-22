@@ -52,7 +52,41 @@ def _is_catalog_request(query: str) -> bool:
 
 
 def _context_table_names(context: dict) -> list[str]:
-    return [table["name"] for table in context.get("tables", []) if table.get("name")]
+    return [
+        table if isinstance(table, str) else table["name"]
+        for table in context.get("tables", [])
+        if isinstance(table, str) or table.get("name")
+    ]
+
+
+def _mock_semantic_plan(query: str, context: dict) -> dict:
+    """Deterministic, offline plan used only by the test runtime."""
+    normalized = query.lower()
+    if any(greeting in normalized for greeting in ("bonjour", "salut", "hello")):
+        return {"intent": "UNRELATED", "confidence": 1.0, "reasoning": "Mock greeting classification."}
+    if normalized in {"montre-moi les données", "montre moi les données", "show me the data"}:
+        return {
+            "intent": "AMBIGUOUS", "confidence": 1.0,
+            "clarification_options": ["Quelle table et quelle mesure souhaitez-vous analyser ?"],
+            "reasoning": "Mock detected an underspecified data request.",
+        }
+    tables = _context_table_names(context)
+    if not tables:
+        return {
+            "intent": "AMBIGUOUS", "confidence": 1.0,
+            "clarification_options": ["Choisissez une source et une table autorisée."],
+            "reasoning": "No catalog table is available to the deterministic mock.",
+        }
+    wants_chart = any(term in normalized for term in ("graph", "graphe", "chart", "visualisation"))
+    return {
+        "intent": "CHART_GENERATION" if wants_chart else "DATA_QUERY",
+        "confidence": 1.0,
+        "source_tables": [tables[0]],
+        "metric": "row_count",
+        "dimensions": [],
+        "filters": [],
+        "reasoning": "Deterministic mock plan for the offline end-to-end workflow.",
+    }
 
 def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
     """Classify the intent and generate a semantic plan based on context."""
@@ -64,6 +98,9 @@ def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
             "source_tables": tables,
             "reasoning": "The user is asking to discover the authorized database schema.",
         }
+
+    if os.getenv("LLM_PROVIDER", "").lower() == "mock":
+        return _mock_semantic_plan(query, context)
 
     llm = _get_llm()
     structured_llm = llm.with_structured_output(SemanticPlanOut)

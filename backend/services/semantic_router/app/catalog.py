@@ -59,7 +59,10 @@ def search_catalog(query: str, tenant_id: str, source_id: str | None = None) -> 
         # Schema discovery needs the complete allowlisted catalog, not a fuzzy RAG
         # match on the user's natural-language question.
         normalized = query.lower()
-        is_discovery = any(term in normalized for term in ("table", "schema", "schéma", "catalog", "catalogue", "colonne", "column"))
+        is_discovery = (
+            any(term in normalized for term in ("table", "schema", "schéma", "catalog", "catalogue", "colonne", "column"))
+            or os.getenv("LLM_PROVIDER", "").lower() == "mock"
+        )
         if is_discovery:
             response = requests.get(
                 f"{CATALOG_URL}/api/v1/catalog/tables",

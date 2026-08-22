@@ -3,6 +3,7 @@
 Uses DeepSeek API to generate valid PostgreSQL queries based on schemas.
 """
 import os
+import re
 from typing import Any, Optional
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
@@ -24,8 +25,30 @@ def _get_llm():
         max_retries=2
     )
 
+
+def _mock_sql_draft(semantic_plan: dict[str, Any], schema: dict[str, Any]) -> SqlDraft:
+    """Offline deterministic SQL for the Docker E2E stack only."""
+    tables = semantic_plan.get("source_tables") or []
+    if not tables:
+        tables = [
+            table["name"] if isinstance(table, dict) else table
+            for table in schema.get("tables", [])
+            if (isinstance(table, dict) and table.get("name")) or isinstance(table, str)
+        ]
+    if not tables or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tables[0]):
+        raise RuntimeError("Mock SQL generation requires one safe source table")
+    table_name = tables[0]
+    return SqlDraft(
+        intent="count rows", metric="row_count", dimensions=[], filters=[],
+        sql_query=f'SELECT COUNT(*) AS row_count FROM "{table_name}"',
+        confidence=1.0,
+        explanation="Deterministic offline count for the end-to-end workflow.",
+    )
+
 def generate_sql(query: str, semantic_plan: dict[str, Any], schema: dict[str, Any]) -> SqlDraft:
     """Generate a SQL query based on natural language and a database schema."""
+    if os.getenv("LLM_PROVIDER", "").lower() == "mock":
+        return _mock_sql_draft(semantic_plan, schema)
     llm = _get_llm()
     structured_llm = llm.with_structured_output(SqlDraft)
     
