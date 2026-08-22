@@ -24,8 +24,7 @@ ask_your_data/
 ├── packages/contracts/     # Shared Pydantic models (pip-installable)
 ├── infra/compose/          # Docker Compose for local dev
 ├── tests/                  # Cross-service contract tests
-├── docs/adr/               # Architecture Decision Records
-└── roadmap/                # Project roadmap
+└── docs/adr/               # Architecture Decision Records
 ```
 
 ### Services
