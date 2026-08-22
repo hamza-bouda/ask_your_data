@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Database, RefreshCw, Lock, Table as TableIcon, ArrowRight, CheckCircle, BarChart2 } from 'lucide-react';
 import { registerDatabase, syncAdminDatasource, getAdminCatalog, updateTablePolicy, setActiveSourceId, createConversation } from '../services/api';
@@ -12,7 +12,7 @@ export default function OnboardingPage() {
   const [tables, setTables] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+
   // Step 4 & 5 states
   const [question, setQuestion] = useState('');
 
@@ -25,10 +25,10 @@ export default function OnboardingPage() {
       setSourceData(registered);
       setActiveSourceId(registered.id);
       setStep(2);
-      
+
       // Auto trigger sync
       await syncAdminDatasource(registered.id);
-      
+
       // Fetch catalog for next step
       const data = await getAdminCatalog(registered.id);
       setTables(data.tables || []);
@@ -77,10 +77,10 @@ export default function OnboardingPage() {
         {/* Stepper */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '40px', position: 'relative' }}>
           <div style={{ position: 'absolute', top: '15px', left: '0', right: '0', height: '2px', background: 'var(--border-color)', zIndex: 0 }} />
-          
+
           {[1, 2, 3, 4].map(num => (
             <div key={num} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 1, background: 'var(--panel-bg)', padding: '0 10px', borderRadius: '50%' }}>
-              <div style={{ 
+              <div style={{
                 width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: step >= num ? 'var(--accent)' : 'var(--panel-bg)',
                 border: `1px solid ${step >= num ? 'var(--accent)' : 'var(--border-color)'}`,
@@ -126,7 +126,7 @@ export default function OnboardingPage() {
           <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
             <h2 style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}><Lock size={24} color="var(--accent)" /> Gouvernance des données</h2>
             <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Sélectionnez les tables qui seront accessibles par vos utilisateurs. Vous pourrez affiner colonne par colonne plus tard.</p>
-            
+
             <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 'var(--border-radius-md)', padding: '12px', background: 'rgba(0,0,0,0.2)' }}>
               {tables.map(table => (
                 <div key={table.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid var(--border-color)', alignItems: 'center' }}>
@@ -141,7 +141,7 @@ export default function OnboardingPage() {
                 </div>
               ))}
             </div>
-            
+
             <button className="btn-primary" style={{ width: '100%', marginTop: '24px' }} onClick={() => setStep(4)}>
               Continuer vers l'exploration <ArrowRight size={16} />
             </button>
@@ -152,14 +152,14 @@ export default function OnboardingPage() {
           <div style={{ animation: 'fadeIn 0.3s ease-out' }}>
             <h2 style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}><BarChart2 size={24} color="var(--accent)" /> Posez votre première question</h2>
             <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Votre base est prête ! Essayez de poser une question en langage naturel.</p>
-            
+
             <form onSubmit={askFirstQuestion}>
               <div className="form-group">
-                <input 
-                  value={question} 
-                  onChange={e => setQuestion(e.target.value)} 
-                  required 
-                  placeholder="Ex: Quel est le chiffre d'affaires par mois ?" 
+                <input
+                  value={question}
+                  onChange={e => setQuestion(e.target.value)}
+                  required
+                  placeholder="Ex: Quel est le chiffre d'affaires par mois ?"
                   autoFocus
                   style={{ fontSize: '1.1rem', padding: '16px' }}
                 />

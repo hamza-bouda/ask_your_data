@@ -5,5 +5,7 @@ sqlalchemy>=2.0
 pgvector>=0.2.7
 sentence-transformers>=2.7.0
 psycopg2-binary>=2.9.9
+pymysql>=1.1,<2
+pymssql>=2.3,<3
 cryptography>=42.0.0
 sqlglot>=23.0

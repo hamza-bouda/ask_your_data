@@ -1,16 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from backend.services.orchestrator.app.main import app
 from backend.services.orchestrator.app.database import Base, engine, get_db
 from backend.services.orchestrator.app.orm_models import Conversation, Message
 
 client = TestClient(app)
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 def setup_db():
+    with engine.begin() as conn:
+        for t in ["export_audits", "dashboard_items", "dashboards", "runs", "messages", "conversations"]:
+            conn.execute(text(f"DROP TABLE IF EXISTS {t}"))
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
 
 def test_export_csv_injection():
     db = next(get_db())
@@ -18,9 +21,9 @@ def test_export_csv_injection():
     db.add(conv)
     db.flush()
     msg = Message(
-        conversation_id=conv.id, 
-        role="assistant", 
-        content="test", 
+        conversation_id=conv.id,
+        role="assistant",
+        content="test",
         payload={
             "results": [
                 {"name": "Alice", "formula": "=1+1"},
@@ -36,7 +39,7 @@ def test_export_csv_injection():
     response = client.get(f"/internal/results/{msg.id}/export?format=csv&tenant_id=t1&user_id=u1")
     assert response.status_code == 200
     content = response.content.decode("utf-8")
-    
+
     # Check that dangerous characters are escaped with a single quote
     assert "'=1+1" in content
     assert "'@sum(1)" in content

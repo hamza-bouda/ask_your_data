@@ -1,8 +1,7 @@
 """Visualization Service — deterministic chart specification.
 
-Phase 01: skeleton with health/ready endpoints only.
-Phase 09 adds ChartSpec generation from ResultSet + SemanticPlan,
-deterministic chart type selection.
+The service selects a safe chart specification from a result set and the
+user's explicit request. Rendering is handled by the ECharts frontend.
 """
 
 from typing import Any, Optional

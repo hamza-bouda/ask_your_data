@@ -46,12 +46,12 @@ const SortableItem = ({ id, item, handleExport, removeItem, isOwner, updateItemC
           {isOwner && <button className="icon-btn danger-icon" title="Retirer du dashboard" onClick={() => removeItem(item.id)}><Trash2 size={17} /></button>}
         </div>
       </header>
-      
+
       {showConfig && (
         <div className="widget-config-panel no-print">
           <label>Titre <input value={localTitle} onChange={e => setLocalTitle(e.target.value)} /></label>
           <label>Notes <textarea value={localNotes} onChange={e => setLocalNotes(e.target.value)} rows="2" /></label>
-          <label>Largeur 
+          <label>Largeur
             <select value={localWidth} onChange={e => setLocalWidth(e.target.value)}>
               <option value="full">Pleine largeur</option>
               <option value="half">Moitié (1/2)</option>
@@ -86,11 +86,11 @@ const DashboardDetailPage = () => {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  
+
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ name: '', description: '', visibility: 'private' });
-  
+
   const [globalFilter, setGlobalFilter] = useState('');
   const [items, setItems] = useState([]);
 
@@ -106,43 +106,43 @@ const DashboardDetailPage = () => {
 
   const isOwner = dashboard?.owner_user_id === currentUser.id;
 
-  const fetchDashboard = useCallback(async () => { 
-    setLoading(true); 
-    setError(''); 
-    try { 
-      const { data } = await api.get(`/v1/dashboards/${id}`); 
+  const fetchDashboard = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.get(`/v1/dashboards/${id}`);
       setDashboard(data);
       setItems(data.items || []);
-      setDraft({ name: data.name, description: data.description || '', visibility: data.visibility }); 
-    } catch (requestError) { 
-      setError(requestError.response?.data?.detail || 'Impossible de charger ce dashboard.'); 
-    } finally { 
-      setLoading(false); 
-    } 
+      setDraft({ name: data.name, description: data.description || '', visibility: data.visibility });
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'Impossible de charger ce dashboard.');
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
-  
+
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
-  
-  const saveDashboard = async (event) => { 
-    event.preventDefault(); 
-    setSaving(true); 
-    setError(''); 
-    try { 
-      await api.patch(`/v1/dashboards/${id}`, draft); 
-      setEditing(false); 
-      await fetchDashboard(); 
-    } catch (requestError) { 
-      setError(requestError.response?.data?.detail || 'Impossible d’enregistrer le dashboard.'); 
-    } finally { 
-      setSaving(false); 
-    } 
+
+  const saveDashboard = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await api.patch(`/v1/dashboards/${id}`, draft);
+      setEditing(false);
+      await fetchDashboard();
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'Impossible d’enregistrer le dashboard.');
+    } finally {
+      setSaving(false);
+    }
   };
-  
+
   const toggleArchive = async () => {
     try {
       await api.patch(`/v1/dashboards/${id}`, { archived: !dashboard.archived });
       await fetchDashboard();
-    } catch (requestError) {
+    } catch {
       setError('Impossible d\'archiver/désarchiver ce dashboard.');
     }
   };
@@ -151,36 +151,36 @@ const DashboardDetailPage = () => {
     try {
       const { data } = await api.post(`/v1/dashboards/${id}/duplicate`);
       navigate(`/dashboards/${data.id}`);
-    } catch (requestError) {
+    } catch {
       setError('Impossible de dupliquer ce dashboard.');
     }
   };
 
-  const deleteDashboard = async () => { 
-    if (!window.confirm('Supprimer définitivement ce dashboard ? Cette action est irréversible.')) return; 
-    try { 
-      await api.delete(`/v1/dashboards/${id}`); 
-      navigate('/dashboards'); 
-    } catch (requestError) { 
-      setError(requestError.response?.data?.detail || 'Impossible de supprimer le dashboard.'); 
-    } 
+  const deleteDashboard = async () => {
+    if (!window.confirm('Supprimer définitivement ce dashboard ? Cette action est irréversible.')) return;
+    try {
+      await api.delete(`/v1/dashboards/${id}`);
+      navigate('/dashboards');
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'Impossible de supprimer le dashboard.');
+    }
   };
-  
-  const removeItem = async (itemId) => { 
-    if (!window.confirm('Retirer ce résultat du dashboard ?')) return; 
-    try { 
-      await api.delete(`/v1/dashboards/${id}/items/${itemId}`); 
+
+  const removeItem = async (itemId) => {
+    if (!window.confirm('Retirer ce résultat du dashboard ?')) return;
+    try {
+      await api.delete(`/v1/dashboards/${id}/items/${itemId}`);
       setItems(items.filter(item => item.id !== itemId));
-    } catch (requestError) { 
-      setError(requestError.response?.data?.detail || 'Impossible de retirer ce résultat.'); 
-    } 
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'Impossible de retirer ce résultat.');
+    }
   };
 
   const updateItemConfig = async (itemId, config) => {
     try {
       await api.patch(`/v1/dashboards/${id}/items/${itemId}`, config);
       setItems(items.map(item => item.id === itemId ? { ...item, ...config } : item));
-    } catch (requestError) {
+    } catch {
       setError('Impossible de mettre à jour le widget.');
     }
   };
@@ -192,7 +192,7 @@ const DashboardDetailPage = () => {
       const newIndex = items.findIndex((i) => i.id === over.id);
       const newItems = arrayMove(items, oldIndex, newIndex);
       setItems(newItems);
-      
+
       // Update order in backend sequentially or rely on order in array
       try {
         await api.patch(`/v1/dashboards/${id}/items/${active.id}`, { order: newIndex });
@@ -203,28 +203,28 @@ const DashboardDetailPage = () => {
     }
   };
 
-  const handleExport = async (messageId) => { 
-    try { 
-      const response = await api.get(`/v1/results/${messageId}/export`, { params: { format: 'csv' }, responseType: 'blob' }); 
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' })); 
-      const link = document.createElement('a'); 
-      link.href = url; link.download = `askyourdata-${messageId}.csv`; 
-      document.body.appendChild(link); link.click(); link.remove(); window.URL.revokeObjectURL(url); 
-    } catch (requestError) { 
-      setError(requestError.response?.data?.detail || 'L’export CSV est indisponible pour ce résultat.'); 
-    } 
+  const handleExport = async (messageId) => {
+    try {
+      const response = await api.get(`/v1/results/${messageId}/export`, { params: { format: 'csv' }, responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv' }));
+      const link = document.createElement('a');
+      link.href = url; link.download = `askyourdata-${messageId}.csv`;
+      document.body.appendChild(link); link.click(); link.remove(); window.URL.revokeObjectURL(url);
+    } catch (requestError) {
+      setError(requestError.response?.data?.detail || 'L’export CSV est indisponible pour ce résultat.');
+    }
   };
-  
+
   if (loading) return <div className="page-loading"><RefreshCw size={22} className="spinner" /> Chargement du dashboard…</div>;
   if (error && !dashboard) return <div className="page-container"><div className="error-message" role="alert">{error}</div><Link className="btn-secondary" to="/dashboards"><ArrowLeft size={16} /> Retour aux dashboards</Link></div>;
   if (!dashboard) return null;
-  
+
   // Simple local filter logic
   const filteredItems = items.map(item => {
     if (!globalFilter) return item;
     const filterLower = globalFilter.toLowerCase();
     // Filter rows in item.results where any value matches the global filter string
-    const filteredResults = (item.results || []).filter(row => 
+    const filteredResults = (item.results || []).filter(row =>
       Object.values(row).some(val => String(val).toLowerCase().includes(filterLower))
     );
     return { ...item, results: filteredResults };
@@ -234,7 +234,7 @@ const DashboardDetailPage = () => {
     <div className="page-container dashboard-detail-page">
       <Link to="/dashboards" className="back-link no-print"><ArrowLeft size={16} /> Tous les dashboards</Link>
       {error && <div className="error-message no-print" role="alert">{error}</div>}
-      
+
       <header className="dashboard-detail-header">
         {editing ? (
           <form className="dashboard-edit-form" onSubmit={saveDashboard}>
@@ -262,18 +262,18 @@ const DashboardDetailPage = () => {
               <h1>{dashboard.name}</h1>
               {dashboard.description && <p>{dashboard.description}</p>}
             </div>
-            
+
             <div className="dashboard-detail-actions no-print">
-              <input 
-                type="text" 
-                placeholder="Filtrer les données (Dates, Source, Valeurs...)" 
-                value={globalFilter} 
+              <input
+                type="text"
+                placeholder="Filtrer les données (Dates, Source, Valeurs...)"
+                value={globalFilter}
                 onChange={(e) => setGlobalFilter(e.target.value)}
                 className="dashboard-filter-input"
               />
               <button className="btn-secondary" onClick={() => window.print()} title="Imprimer ou Exporter en PDF"><Printer size={16} /> Imprimer</button>
               <button className="btn-secondary" onClick={duplicateDashboard} title="Dupliquer"><Copy size={16} /> Dupliquer</button>
-              
+
               {isOwner && (
                 <>
                   <button className="btn-secondary" onClick={toggleArchive} title={dashboard.archived ? "Désarchiver" : "Archiver"}>
@@ -287,7 +287,7 @@ const DashboardDetailPage = () => {
           </>
         )}
       </header>
-      
+
       {items.length === 0 ? (
         <section className="empty-state dashboard-empty no-print">
           <div className="empty-state-icon"><FileWarning size={30} /></div>
@@ -299,11 +299,11 @@ const DashboardDetailPage = () => {
           <SortableContext items={filteredItems.map(i => i.id)} strategy={rectSortingStrategy}>
             <section className="dashboard-item-grid" aria-label="Résultats du dashboard">
               {filteredItems.map((item) => (
-                <SortableItem 
-                  key={item.id} 
-                  id={item.id} 
-                  item={item} 
-                  handleExport={handleExport} 
+                <SortableItem
+                  key={item.id}
+                  id={item.id}
+                  item={item}
+                  handleExport={handleExport}
                   removeItem={removeItem}
                   isOwner={isOwner}
                   updateItemConfig={updateItemConfig}

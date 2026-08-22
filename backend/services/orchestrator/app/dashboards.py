@@ -5,8 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.database import get_db
-from app.orm_models import Dashboard, DashboardItem, ExportAudit, Message
+try:
+    from app.database import get_db
+    from app.orm_models import Dashboard, DashboardItem, ExportAudit, Message
+except ImportError:
+    from backend.services.orchestrator.app.database import get_db
+    from backend.services.orchestrator.app.orm_models import Dashboard, DashboardItem, ExportAudit, Message
+
 import structlog
 from prometheus_client import Counter
 
@@ -111,7 +116,7 @@ def create_dashboard(
             payload_snapshot=payload_snapshot
         )
         db.add(db_item)
-    
+
     db.commit()
     DASHBOARDS_CREATED_TOTAL.inc()
     return {"id": dashboard.id, "status": "created"}
@@ -126,7 +131,7 @@ def list_dashboards(
     query = db.query(Dashboard).filter(Dashboard.tenant_id == tenant_id)
     if not include_archived:
         query = query.filter(Dashboard.archived == False)
-    
+
     dashboards = query.all()
     # Filter by visibility
     result = []
@@ -157,7 +162,7 @@ def get_dashboard(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    
+
     verify_dashboard_access(dashboard, tenant_id, user_id, is_admin)
 
     items = db.query(DashboardItem).filter(DashboardItem.dashboard_id == dashboard_id).order_by(DashboardItem.order).all()
@@ -165,7 +170,7 @@ def get_dashboard(
     for item in items:
         # Prioritize payload snapshot
         payload = item.payload_snapshot or {}
-        
+
         # Fallback to message payload for older items
         if not payload:
             msg = db.query(Message).filter(Message.id == item.source_message_id).first()
@@ -174,12 +179,12 @@ def get_dashboard(
                 payload["source_id"] = msg.conversation.source_id
                 payload["execution_date"] = msg.created_at.isoformat() if msg.created_at else None
                 payload["semantic_context"] = payload.get("semantic_plan")
-        
+
         # Enforce source isolation if a specific source_id is requested
         item_source_id = payload.get("source_id")
         if item_source_id and source_id and item_source_id != source_id:
             continue
-            
+
         items_data.append({
             "id": item.id,
             "title": item.title,
@@ -221,7 +226,7 @@ def update_dashboard(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    
+
     verify_dashboard_modify(dashboard, tenant_id, user_id, is_admin)
 
     if body.name is not None:
@@ -236,7 +241,7 @@ def update_dashboard(
         dashboard.archived = body.archived
     if body.filters is not None:
         dashboard.filters = body.filters
-        
+
     db.commit()
     return {"status": "updated"}
 
@@ -251,7 +256,7 @@ def duplicate_dashboard(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    
+
     verify_dashboard_access(dashboard, tenant_id, user_id, is_admin)
 
     new_dashboard = Dashboard(
@@ -279,7 +284,7 @@ def duplicate_dashboard(
             payload_snapshot=item.payload_snapshot
         )
         db.add(new_item)
-        
+
     db.commit()
     DASHBOARDS_CREATED_TOTAL.inc()
     return {"id": new_dashboard.id, "status": "duplicated"}
@@ -296,7 +301,7 @@ def delete_dashboard(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         return {"status": "ok"} # idempotent
-    
+
     verify_dashboard_modify(dashboard, tenant_id, user_id, is_admin)
     db.delete(dashboard)
     db.commit()
@@ -314,9 +319,9 @@ def add_dashboard_item(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-    
+
     verify_dashboard_modify(dashboard, tenant_id, user_id, is_admin)
-    
+
     msg = db.query(Message).filter(Message.id == body.source_message_id).first()
     if not msg or msg.conversation.tenant_id != tenant_id:
         raise HTTPException(status_code=400, detail="Invalid source message")
@@ -364,9 +369,9 @@ def update_dashboard_item(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-        
+
     verify_dashboard_modify(dashboard, tenant_id, user_id, is_admin)
-    
+
     item = db.query(DashboardItem).filter(DashboardItem.id == item_id, DashboardItem.dashboard_id == dashboard_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Dashboard item not found")
@@ -381,7 +386,7 @@ def update_dashboard_item(
         item.order = body.order
     if body.display_config is not None:
         item.display_config = body.display_config
-        
+
     db.commit()
     return {"status": "updated"}
 
@@ -397,9 +402,9 @@ def delete_dashboard_item(
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
-        
+
     verify_dashboard_modify(dashboard, tenant_id, user_id, is_admin)
-    
+
     item = db.query(DashboardItem).filter(DashboardItem.id == item_id, DashboardItem.dashboard_id == dashboard_id).first()
     if item:
         db.delete(item)
@@ -427,31 +432,31 @@ def export_results(
 ):
     if format != "csv":
         raise HTTPException(status_code=400, detail="Unsupported format")
-        
+
     msg = db.query(Message).filter(Message.id == message_id).first()
-    
+
     is_forbidden = not msg or msg.conversation.tenant_id != tenant_id
     if msg and source_id and msg.conversation.source_id != source_id:
         is_forbidden = True
-        
+
     if is_forbidden:
         audit = ExportAudit(tenant_id=tenant_id, user_id=user_id, source_message_id=message_id, format=format, status="denied")
         db.add(audit)
         db.commit()
         CSV_EXPORTS_TOTAL.labels(status="denied", format=format).inc()
         raise HTTPException(status_code=404, detail="Result not found or forbidden")
-        
+
     payload = msg.payload or {}
     results = payload.get("results", [])
-    
+
     if not results or not isinstance(results, list):
         raise HTTPException(status_code=400, detail="No tabular results available for export")
-        
+
     # Apply limit
     MAX_ROWS = 10000
     if len(results) > MAX_ROWS:
         results = results[:MAX_ROWS]
-        
+
     # Generate CSV
     output = io.StringIO()
     if len(results) > 0:
@@ -462,7 +467,7 @@ def export_results(
         for row in results:
             sanitized_row = {k: sanitize_csv_cell(v) for k, v in row.items()}
             writer.writerow(sanitized_row)
-            
+
     audit = ExportAudit(tenant_id=tenant_id, user_id=user_id, source_message_id=message_id, format=format, status="success", row_count=len(results))
     db.add(audit)
     db.commit()

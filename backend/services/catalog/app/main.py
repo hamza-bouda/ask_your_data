@@ -19,8 +19,13 @@ except ImportError:  # Enables API-contract tests that do not use embeddings.
 from contracts.service_factory import create_service_app
 from observability import setup_logging, setup_tracing, setup_metrics
 
-from app.database import get_db, create_tables
-from app.models import DataSource, TenantDatabase, TableSchema, ColumnSchema, AdminAudit, SemanticMetric, SemanticSynonym, CatalogDocument
+try:
+    from app.database import get_db, create_tables
+    from app.models import DataSource, TenantDatabase, TableSchema, ColumnSchema, AdminAudit, SemanticMetric, SemanticSynonym, CatalogDocument
+except ImportError:
+    from backend.services.catalog.app.database import get_db, create_tables
+    from backend.services.catalog.app.models import DataSource, TenantDatabase, TableSchema, ColumnSchema, AdminAudit, SemanticMetric, SemanticSynonym, CatalogDocument
+
 
 app = create_service_app(service_name="catalog")
 
@@ -50,21 +55,32 @@ def startup_event():
         # constrained deployments deterministic without downloading a model.
         print("Catalog embeddings disabled; using lexical retrieval fallback.")
     
-    app_env = os.getenv("APP_ENV", "development").lower()
-    is_production = app_env in {"production", "prod"}
-    fernet_key = os.getenv("FERNET_KEY")
-    if not fernet_key:
-        if is_production:
-            raise RuntimeError("FERNET_KEY must be configured in production.")
-        print("WARNING: FERNET_KEY not set. Using a temporary development key.")
-        fernet_key = Fernet.generate_key().decode()
-    cipher_suite = Fernet(fernet_key.encode())
+    global cipher_suite
+    cipher_suite = get_cipher_suite()
+
+_cipher_suite: Fernet | None = None
+
+def get_cipher_suite() -> Fernet:
+    global _cipher_suite
+    if _cipher_suite is None:
+        app_env = os.getenv("APP_ENV", "development").lower()
+        is_production = app_env in {"production", "prod"}
+        fernet_key = os.getenv("FERNET_KEY")
+        if not fernet_key:
+            if is_production:
+                raise RuntimeError("FERNET_KEY must be configured in production.")
+            fernet_key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        try:
+            _cipher_suite = Fernet(fernet_key.encode())
+        except Exception:
+            _cipher_suite = Fernet(Fernet.generate_key())
+    return _cipher_suite
 
 def encrypt_secret(secret: str) -> str:
-    return cipher_suite.encrypt(secret.encode()).decode()
+    return get_cipher_suite().encrypt(secret.encode()).decode()
 
 def decrypt_secret(secret: str) -> str:
-    return cipher_suite.decrypt(secret.encode()).decode()
+    return get_cipher_suite().decrypt(secret.encode()).decode()
 
 def log_audit(db: Session, tenant_id: str, user_id: str, action: str, target: str, correlation_id: str = None):
     audit = AdminAudit(
@@ -161,18 +177,21 @@ def register_database(body: RegisterRequest, request: Request, db: Session = Dep
     user_id = request.headers.get("x-user-id", "system")
     correlation_id = request.headers.get("x-correlation-id")
     
-    # 1. Connect and validate (Test connection)
+    # 1. Connect and validate (Test connection using DB adapter)
     try:
-        target_engine = create_engine(body.connection_string)
-        with target_engine.connect() as conn:
-            pass
+        from contracts.adapters import DatabaseAdapterFactory
+        adapter = DatabaseAdapterFactory.get_adapter(body.connection_string)
+        if not adapter.test_connection(body.connection_string):
+            raise HTTPException(status_code=400, detail="Failed to connect to database")
+        dialect = adapter.dialect
+    except HTTPException:
+        raise
     except Exception:
         # Driver exceptions can contain host names, usernames, or credentials.
         raise HTTPException(status_code=400, detail="Failed to connect to database")
 
     # 2. Store encrypted connection string
     encrypted_conn_str = encrypt_secret(body.connection_string)
-    dialect = target_engine.dialect.name
 
     # Child catalog tables still retain their legacy tenant foreign key during
     # the additive migration. Ensure that compatibility parent exists for a
@@ -183,34 +202,38 @@ def register_database(body: RegisterRequest, request: Request, db: Session = Dep
             name=f"Database for {tenant_id}", dialect=dialect,
             status="active", is_allowed=True,
         ))
+        db.flush()
     
     db_record = None
+    target_name = (body.name or f"Database for {tenant_id}").strip()
     if body.source_id:
         db_record = db.query(DataSource).filter(
             DataSource.id == body.source_id, DataSource.tenant_id == tenant_id
         ).first()
         if not db_record:
             raise HTTPException(status_code=404, detail="Datasource not found")
-    elif not body.name:
-        # Preserve the old single-source registration behaviour for existing
-        # clients while allowing named registrations to create extra sources.
-        existing = db.query(DataSource).filter(DataSource.tenant_id == tenant_id).limit(2).all()
-        if len(existing) == 1:
-            db_record = existing[0]
+    else:
+        db_record = db.query(DataSource).filter(
+            DataSource.tenant_id == tenant_id, DataSource.name == target_name
+        ).first()
+        if not db_record and not body.name:
+            existing = db.query(DataSource).filter(DataSource.tenant_id == tenant_id).limit(2).all()
+            if len(existing) == 1:
+                db_record = existing[0]
 
     if not db_record:
         db_record = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             connection_string=encrypted_conn_str, dialect=dialect,
-            name=(body.name or f"Database for {tenant_id}"), status="registered",
+            name=target_name, status="active",
             is_allowed=True,
         )
         db.add(db_record)
     else:
         db_record.connection_string = encrypted_conn_str
         db_record.dialect = dialect
-        db_record.name = body.name or db_record.name
-        db_record.status = "registered"
+        db_record.name = target_name
+        db_record.status = "active"
         db_record.is_allowed = True
         
     log_audit(db, tenant_id, user_id, "register_source", f"source:{db_record.id}", correlation_id)
@@ -222,6 +245,7 @@ def register_database(body: RegisterRequest, request: Request, db: Session = Dep
 def sync_database(request: Request, db: Session = Depends(get_db)):
     """Introspects the target database, extracts full schemas, generates RAG documents."""
     import json
+    from contracts.adapters import DatabaseAdapterFactory
     tenant_id = request.headers.get("x-tenant-id", "acme")
     user_id = request.headers.get("x-user-id", "system")
     correlation_id = request.headers.get("x-correlation-id")
@@ -230,9 +254,9 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
         
     try:
         conn_string = decrypt_secret(db_record.connection_string)
-        target_engine = create_engine(conn_string)
-        inspector = inspect(target_engine)
-        table_names = inspector.get_table_names()
+        adapter = DatabaseAdapterFactory.get_adapter(conn_string)
+        introspection = adapter.introspect_schema(conn_string)
+        table_introspections = introspection.tables
     except Exception:
         db_record.status = "error"
         db.commit()
@@ -250,16 +274,13 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
         for c in t.columns:
             c.is_available = False
 
-    for table_name in table_names:
-        cols = inspector.get_columns(table_name)
-        pk_constraint = inspector.get_pk_constraint(table_name)
-        fks = inspector.get_foreign_keys(table_name)
-        indices = inspector.get_indexes(table_name)
-        table_comment = inspector.get_table_comment(table_name)
-        
-        primary_key = pk_constraint.get("constrained_columns", []) if pk_constraint else []
+    for t_intro in table_introspections:
+        table_name = t_intro.name
+        primary_key = t_intro.primary_key
         pk_str = primary_key[0] if primary_key else None
-        desc = table_comment.get("text", "") if table_comment and table_comment.get("text") else ""
+        desc = t_intro.comment or ""
+        fks = [fk.model_dump() for fk in t_intro.foreign_keys]
+        indices = [idx.model_dump() for idx in t_intro.indices]
         
         t_record = existing_tables_map.get(table_name)
         if t_record:
@@ -288,11 +309,11 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
 
         existing_cols = {c.column_name: c for c in t_record.columns}
         col_names = []
-        for col in cols:
-            c_name = col["name"]
-            c_type = str(col["type"])
-            c_nullable = col.get("nullable", True)
-            c_desc = col.get("comment", "") or ""
+        for col_intro in t_intro.columns:
+            c_name = col_intro.name
+            c_type = col_intro.data_type
+            c_nullable = col_intro.is_nullable
+            c_desc = col_intro.comment or ""
             col_names.append(c_name)
             
             c_record = existing_cols.get(c_name)
@@ -350,7 +371,7 @@ def sync_database(request: Request, db: Session = Depends(get_db)):
     log_audit(db, tenant_id, user_id, "sync_source", f"source:{db_record.id}", correlation_id)
     db.commit()
     
-    return {"status": "success", "tables_indexed": len(table_names), "last_synced_at": db_record.last_synced_at.isoformat(), "catalog_version": current_version}
+    return {"status": "success", "tables_indexed": len(table_introspections), "last_synced_at": db_record.last_synced_at.isoformat(), "catalog_version": current_version}
 
 class SemanticMetricRequest(BaseModel):
     name: str

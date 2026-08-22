@@ -1,1 +1,0 @@
-# Query Execution app package

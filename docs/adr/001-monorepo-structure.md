@@ -29,13 +29,15 @@ ask_your_data/
 ```
 
 ### Services
-Six services, each with its own `Dockerfile`, `requirements.txt`, and `app/` package:
+The microservices, each with its own `Dockerfile`, `requirements.txt`, and `app/` package:
 - **gateway** (port 8000) — API Gateway / BFF
 - **identity** (port 8001) — Identity & Tenant resolution
 - **catalog** (port 8002) — Schema Catalog & Retrieval
-- **query_execution** (port 8003) — SQL validation & execution
-- **orchestrator** (port 8004) — LangGraph conversation pipeline
-- **visualization** (port 8005) — Chart specification
+- **orchestrator** (port 8004) — LangGraph conversation pipeline & worker
+- **visualization** (port 8005) — Chart specification & type determination
+- **sql_generator** (port 8006) — Text-to-SQL generation & query repair
+- **sql_executor** (port 8007) — Safe read-only multi-dialect SQL validation & execution
+- **semantic_router** (port 8008) — Semantic intent classification & planning
 
 ### Shared Contracts
 The `packages/contracts` package is installed as a local dependency in each

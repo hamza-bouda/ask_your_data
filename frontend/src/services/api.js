@@ -222,3 +222,8 @@ export const getAdminDlqRuns = async () => {
   const response = await api.get('/v1/admin/health/runs/dlq');
   return response.data;
 };
+
+export const globalSearch = async (q, limit = 10) => {
+  const response = await api.get('/api/v1/search', { params: { q, limit } });
+  return response.data;
+};

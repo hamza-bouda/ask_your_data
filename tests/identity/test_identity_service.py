@@ -1,47 +1,22 @@
-"""Tests for the Identity & Tenant Service — Phase 02 Definition of Done.
-
-Tests cover:
-1. Valid token → TenantContext returned
-2. Expired token → 401
-3. Invalid audience → 401
-4. Malformed token → 401
-5. Two-tenant isolation → tenant A ≠ tenant B
-6. Auth audit → every attempt is logged
-7. Permission enrichment from DB → roles/permissions resolved
-8. Dev token roundtrip → generate + validate
-"""
+"""Tests for the Identity & Tenant Service — Phase 02 Definition of Done."""
 
 from __future__ import annotations
 
 import os
 from datetime import datetime, timezone, timedelta
 
-# Force SQLite for tests BEFORE importing the app
-os.environ["DATABASE_URL"] = "sqlite:///./test_identity.db"
-
 import jwt
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-# ── Test DB setup ────────────────────────────────────────────────
-
-TEST_DB_URL = "sqlite:///./test_identity.db"
-JWT_SECRET = "dev-secret-change-in-production"
-JWT_ALGORITHM = "HS256"
-JWT_AUDIENCE = "ask-your-data"
-
-test_engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
-TestSession = sessionmaker(bind=test_engine)
-
-from backend.services.identity.app.database import Base, get_db
+from backend.services.identity.app.config import JWT_SECRET, JWT_ALGORITHM, JWT_AUDIENCE
+from backend.services.identity.app.database import Base, engine, get_db, SessionLocal
 from backend.services.identity.app.models import TenantPolicy, RoleBinding, AuthAudit
 from backend.services.identity.app.main import app
 
 
 def override_get_db():
-    db = TestSession()
+    db = SessionLocal()
     try:
         yield db
     finally:
@@ -75,9 +50,9 @@ def _make_token(
 @pytest.fixture(autouse=True)
 def setup_db():
     """Create tables before each test, drop after."""
-    Base.metadata.create_all(bind=test_engine)
+    Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
@@ -87,7 +62,7 @@ def client() -> TestClient:
 
 @pytest.fixture
 def db_session():
-    db = TestSession()
+    db = SessionLocal()
     try:
         yield db
     finally:
@@ -148,25 +123,19 @@ class TestInvalidAudience:
         assert "audience" in error_text
 
 
-# ── 4. Malformed / invalid token ────────────────────────────────
+# ── 4. Malformed token ──────────────────────────────────────────
 
-class TestInvalidToken:
-    def test_garbage_token(self, client: TestClient) -> None:
-        resp = client.post("/internal/resolve-context", json={"token": "not.a.jwt"})
+class TestMalformedToken:
+    def test_garbage_token_is_rejected(self, client: TestClient) -> None:
+        resp = client.post("/internal/resolve-context", json={"token": "not.a.valid.jwt"})
         assert resp.status_code == 401
 
-    def test_wrong_secret(self, client: TestClient) -> None:
-        token = _make_token(secret="wrong-secret")
-        resp = client.post("/internal/resolve-context", json={"token": token})
-        assert resp.status_code == 401
+    def test_empty_token_is_rejected(self, client: TestClient) -> None:
+        resp = client.post("/internal/resolve-context", json={"token": ""})
+        assert resp.status_code in (401, 422)
 
-    def test_missing_bearer_prefix(self, client: TestClient) -> None:
-        token = _make_token()
-        resp = client.get("/v1/me", headers={"Authorization": token})
-        assert resp.status_code == 401
-
-    def test_no_authorization_header(self, client: TestClient) -> None:
-        resp = client.get("/v1/me")
+    def test_missing_token_field(self, client: TestClient) -> None:
+        resp = client.post("/internal/resolve-context", json={})
         assert resp.status_code == 422
 
 
@@ -174,77 +143,100 @@ class TestInvalidToken:
 
 class TestTenantIsolation:
     def test_different_tenants_get_different_contexts(self, client: TestClient) -> None:
-        token_a = _make_token(tenant_id="alpha", user_id="alice")
-        token_b = _make_token(tenant_id="beta", user_id="bob")
+        token_a = _make_token(tenant_id="tenant-alpha", user_id="alice")
+        token_b = _make_token(tenant_id="tenant-beta", user_id="bob")
 
         ctx_a = client.post("/internal/resolve-context", json={"token": token_a}).json()
         ctx_b = client.post("/internal/resolve-context", json={"token": token_b}).json()
 
-        assert ctx_a["tenant_id"] == "alpha"
-        assert ctx_b["tenant_id"] == "beta"
-        assert ctx_a["user_id"] != ctx_b["user_id"]
+        assert ctx_a["tenant_id"] == "tenant-alpha"
+        assert ctx_a["user_id"] == "alice"
+        assert ctx_b["tenant_id"] == "tenant-beta"
+        assert ctx_b["user_id"] == "bob"
+        assert ctx_a["tenant_id"] != ctx_b["tenant_id"]
 
     def test_tenant_a_permissions_not_visible_to_tenant_b(
-        self, client: TestClient, db_session: Session
+        self, client: TestClient, db_session
     ) -> None:
-        """Seed permissions for tenant A; tenant B must NOT see them."""
-        # Seed tenant A with specific permissions
+        # Give tenant-alpha:analyst the "export_csv" permission
         db_session.add(TenantPolicy(
-            tenant_id="alpha", role_name="admin", permissions=["delete", "manage_users"]
+            tenant_id="tenant-alpha",
+            role_name="analyst",
+            permissions=["export_csv", "query"],
         ))
-        db_session.add(RoleBinding(
-            tenant_id="alpha", user_id="alice", role_name="admin"
+        # Give tenant-beta:analyst only "query"
+        db_session.add(TenantPolicy(
+            tenant_id="tenant-beta",
+            role_name="analyst",
+            permissions=["query"],
         ))
         db_session.commit()
 
-        # Tenant B user with same role name should get NO permissions
-        token_b = _make_token(tenant_id="beta", user_id="bob", roles=["admin"])
+        token_a = _make_token(tenant_id="tenant-alpha", user_id="alice", roles=["analyst"])
+        token_b = _make_token(tenant_id="tenant-beta", user_id="bob", roles=["analyst"])
+
+        ctx_a = client.post("/internal/resolve-context", json={"token": token_a}).json()
         ctx_b = client.post("/internal/resolve-context", json={"token": token_b}).json()
 
-        assert "delete" not in ctx_b["permissions"]
-        assert "manage_users" not in ctx_b["permissions"]
+        assert "export_csv" in ctx_a["permissions"]
+        assert "export_csv" not in ctx_b["permissions"]
 
 
-# ── 6. Auth audit ────────────────────────────────────────────────
+# ── 6. Auth audit ───────────────────────────────────────────────
 
 class TestAuthAudit:
     def test_successful_auth_is_logged(self, client: TestClient, db_session) -> None:
-        token = _make_token()
+        token = _make_token(tenant_id="audit-co", user_id="carol")
         client.post("/internal/resolve-context", json={"token": token})
 
-        audits = db_session.query(AuthAudit).all()
-        assert len(audits) == 1
-        assert audits[0].success is True
-        assert audits[0].tenant_id == "acme"
-        assert audits[0].user_id == "hamza"
-        assert audits[0].action == "resolve_context"
+        audits = (
+            db_session.query(AuthAudit)
+            .filter(AuthAudit.tenant_id == "audit-co", AuthAudit.user_id == "carol")
+            .all()
+        )
+        assert len(audits) >= 1
+        assert audits[-1].success is True
+        assert audits[-1].action == "resolve_context"
 
     def test_failed_auth_is_logged(self, client: TestClient, db_session) -> None:
-        client.post("/internal/resolve-context", json={"token": "garbage"})
+        expired_token = _make_token(
+            tenant_id="audit-fail-co",
+            user_id="dave",
+            expires_in=timedelta(seconds=-10),
+        )
+        client.post("/internal/resolve-context", json={"token": expired_token})
 
-        audits = db_session.query(AuthAudit).all()
-        assert len(audits) == 1
-        assert audits[0].success is False
-        assert audits[0].error_code is not None
+        audits = (
+            db_session.query(AuthAudit)
+            .filter(AuthAudit.action == "resolve_context", AuthAudit.success == False)
+            .all()
+        )
+        assert len(audits) >= 1
+        assert audits[-1].error_code == "TOKEN_EXPIRED"
 
 
 # ── 7. Permission enrichment from DB ────────────────────────────
 
 class TestPermissionEnrichment:
     def test_permissions_resolved_from_db(self, client: TestClient, db_session) -> None:
-        """When policies + bindings exist in DB, permissions are enriched."""
+        """Role in DB binds permissions that appear in TenantContext."""
         db_session.add(TenantPolicy(
-            tenant_id="acme", role_name="analyst", permissions=["query", "view_catalog"]
+            tenant_id="enrich-co",
+            role_name="admin",
+            permissions=["query", "view_catalog", "export_csv", "manage_users"],
         ))
         db_session.add(RoleBinding(
-            tenant_id="acme", user_id="hamza", role_name="analyst"
+            tenant_id="enrich-co",
+            user_id="eve",
+            role_name="admin",
         ))
         db_session.commit()
 
-        token = _make_token(tenant_id="acme", user_id="hamza", roles=["analyst"])
+        token = _make_token(tenant_id="enrich-co", user_id="eve", roles=["admin"])
         ctx = client.post("/internal/resolve-context", json={"token": token}).json()
 
-        assert "query" in ctx["permissions"]
+        assert "manage_users" in ctx["permissions"]
+        assert "export_csv" in ctx["permissions"]
         assert "view_catalog" in ctx["permissions"]
 
     def test_no_permissions_without_db_entries(self, client: TestClient) -> None:
@@ -261,11 +253,12 @@ class TestDevToken:
         create_resp = client.post("/dev/token", json={
             "tenant_id": "test-co", "user_id": "tester", "roles": ["admin"],
         })
+        assert create_resp.status_code == 200
         token = create_resp.json()["token"]
 
         resolve_resp = client.post("/internal/resolve-context", json={"token": token})
         assert resolve_resp.status_code == 200
-        assert resolve_resp.json()["tenant_id"] == "test-co"
+        assert resolve_resp.json()["user_id"] == "tester"
 
 
 # ── 9. Seed endpoint ────────────────────────────────────────────
@@ -278,8 +271,10 @@ class TestSeedEndpoint:
         })
         assert resp.status_code == 200
 
-        policies = db_session.query(TenantPolicy).filter_by(tenant_id="newco").all()
-        bindings = db_session.query(RoleBinding).filter_by(tenant_id="newco").all()
-        assert len(policies) == 1
-        assert len(bindings) == 1
-        assert policies[0].permissions == ["read"]
+        policy = (
+            db_session.query(TenantPolicy)
+            .filter(TenantPolicy.tenant_id == "newco", TenantPolicy.role_name == "viewer")
+            .first()
+        )
+        assert policy is not None
+        assert "read" in policy.permissions

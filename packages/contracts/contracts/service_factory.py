@@ -44,7 +44,7 @@ def create_service_app(
 
     import os
     import hmac
-    
+
     @app.middleware("http")
     async def enforce_internal_admin_token(request: Request, call_next: Any) -> Any:
         if request.url.path.startswith("/internal/"):
@@ -99,9 +99,11 @@ def create_service_app(
     async def _http_exception_handler(
         request: Request, exc: StarletteHTTPException
     ) -> JSONResponse:
+        detail_val = str(exc.detail) if exc.detail is not None else None
         error = ApiError(
             code=f"HTTP_{exc.status_code}",
-            message=str(exc.detail),
+            message=detail_val or "HTTP Error",
+            detail=detail_val,
             trace_id=request.headers.get("x-trace-id", ""),
             timestamp=datetime.now(timezone.utc),
         )

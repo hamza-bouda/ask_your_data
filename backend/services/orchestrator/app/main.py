@@ -15,23 +15,30 @@ import traceback
 import hmac
 import os
 
-from app.redis_client import get_redis_client, close_redis_client
+try:
+    from .redis_client import get_redis_client, close_redis_client
+    from .models import ConversationState
+    from .graph import orchestrator_graph
+    from .database import create_tables, get_db
+    from .orm_models import Conversation, Message, Run, Dashboard, DashboardItem, ExportAudit
+except (ImportError, ValueError):
+    try:
+        from backend.services.orchestrator.app.redis_client import get_redis_client, close_redis_client
+        from backend.services.orchestrator.app.models import ConversationState
+        from backend.services.orchestrator.app.graph import orchestrator_graph
+        from backend.services.orchestrator.app.database import create_tables, get_db
+        from backend.services.orchestrator.app.orm_models import Conversation, Message, Run, Dashboard, DashboardItem, ExportAudit
+    except ImportError:
+        from app.redis_client import get_redis_client, close_redis_client
+        from app.models import ConversationState
+        from app.graph import orchestrator_graph
+        from app.database import create_tables, get_db
+        from app.orm_models import Conversation, Message, Run, Dashboard, DashboardItem, ExportAudit
+
 
 from contracts.service_factory import create_service_app
+from contracts.events import RunEventType
 from observability import setup_logging, setup_tracing, setup_metrics
-
-from contracts.events import RunEvent, RunEventType
-
-try:
-    from app.models import ConversationState
-    from app.graph import orchestrator_graph
-    from app.database import create_tables, get_db
-    from app.orm_models import Conversation, Message, Run
-except ImportError:
-    from backend.services.orchestrator.app.models import ConversationState
-    from backend.services.orchestrator.app.graph import orchestrator_graph
-    from backend.services.orchestrator.app.database import create_tables, get_db
-    from backend.services.orchestrator.app.orm_models import Conversation, Message, Run
 
 from sqlalchemy.orm import Session
 
@@ -401,4 +408,3 @@ async def get_stuck_runs(
     stuck = db.query(Run).filter(Run.status.in_(["pending", "running"])).all()
     
     return {"stuck_runs": [{"id": r.id, "status": r.status, "attempts": r.attempts, "created_at": r.created_at} for r in stuck]}
-

@@ -4,15 +4,19 @@ from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Integer, Bool
 from sqlalchemy.orm import relationship
 
 try:
-    from app.database import Base
-except ImportError:
-    from backend.services.orchestrator.app.database import Base
+    from .database import Base
+except (ImportError, ValueError):
+    try:
+        from backend.services.orchestrator.app.database import Base
+    except ImportError:
+        from app.database import Base
 
 def generate_uuid():
     return str(uuid.uuid4())
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(String, primary_key=True, default=generate_uuid)
     tenant_id = Column(String, index=True, nullable=False)
@@ -27,6 +31,7 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(String, primary_key=True, default=generate_uuid)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
@@ -39,6 +44,7 @@ class Message(Base):
 
 class Run(Base):
     __tablename__ = "runs"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(String, primary_key=True, default=generate_uuid)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
@@ -62,6 +68,7 @@ class Run(Base):
 
 class Dashboard(Base):
     __tablename__ = "dashboards"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(String, primary_key=True, default=generate_uuid)
     tenant_id = Column(String, index=True, nullable=False)
@@ -79,6 +86,7 @@ class Dashboard(Base):
 
 class DashboardItem(Base):
     __tablename__ = "dashboard_items"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(String, primary_key=True, default=generate_uuid)
     dashboard_id = Column(String, ForeignKey("dashboards.id"), nullable=False)
@@ -96,6 +104,7 @@ class DashboardItem(Base):
 
 class ExportAudit(Base):
     __tablename__ = "export_audits"
+    __table_args__ = {"extend_existing": True}
 
     id = Column(String, primary_key=True, default=generate_uuid)
     tenant_id = Column(String, index=True, nullable=False)

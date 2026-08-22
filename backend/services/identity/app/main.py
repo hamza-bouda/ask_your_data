@@ -9,6 +9,10 @@ Endpoints:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import Header, HTTPException, Depends
@@ -21,15 +25,21 @@ from observability import setup_logging, setup_tracing, setup_metrics
 from contracts.tenant import TenantContext
 
 try:
-    from app.jwt_handler import decode_token, TokenError
-    from app.database import get_db, create_tables, SessionLocal
-    from app.models import TenantPolicy, RoleBinding, AuthAudit, User
-    from app.config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
-except ImportError:
-    from backend.services.identity.app.jwt_handler import decode_token, TokenError
-    from backend.services.identity.app.database import get_db, create_tables, SessionLocal
-    from backend.services.identity.app.models import TenantPolicy, RoleBinding, AuthAudit, User
-    from backend.services.identity.app.config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
+    from .jwt_handler import decode_token, TokenError
+    from .database import get_db, create_tables, SessionLocal
+    from .models import TenantPolicy, RoleBinding, AuthAudit, User
+    from .config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
+except (ImportError, ValueError):
+    try:
+        from backend.services.identity.app.jwt_handler import decode_token, TokenError
+        from backend.services.identity.app.database import get_db, create_tables, SessionLocal
+        from backend.services.identity.app.models import TenantPolicy, RoleBinding, AuthAudit, User
+        from backend.services.identity.app.config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
+    except ImportError:
+        from app.jwt_handler import decode_token, TokenError
+        from app.database import get_db, create_tables, SessionLocal
+        from app.models import TenantPolicy, RoleBinding, AuthAudit, User
+        from app.config import LOCAL_AUTH_ENABLED, DEV_ENDPOINTS_ENABLED
 
 
 app = create_service_app(service_name="identity")
@@ -38,6 +48,39 @@ app = create_service_app(service_name="identity")
 setup_logging(service_name="identity")
 setup_tracing(service_name="identity", app=app)
 setup_metrics(app)
+
+
+_PASSWORD_SCHEME = "scrypt"
+
+
+def hash_password(password: str) -> str:
+    """Hash a local-auth password with a per-user salt."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=2**14,
+        r=8,
+        p=1,
+        dklen=32,
+    )
+    return "$".join(
+        (_PASSWORD_SCHEME, base64.urlsafe_b64encode(salt).decode(), base64.urlsafe_b64encode(digest).decode())
+    )
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a hashed password and reject malformed hashes safely."""
+    try:
+        scheme, encoded_salt, encoded_digest = stored_hash.split("$", 2)
+        if scheme != _PASSWORD_SCHEME:
+            return False
+        salt = base64.urlsafe_b64decode(encoded_salt.encode())
+        expected = base64.urlsafe_b64decode(encoded_digest.encode())
+        actual = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=len(expected))
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError):
+        return False
 
 
 
@@ -50,7 +93,7 @@ def on_startup() -> None:
         return
     db = SessionLocal()
     if not db.query(User).filter(User.username == "hamza").first():
-        db.add(User(id="hamza", tenant_id="acme", username="hamza", password="password"))
+        db.add(User(id="hamza", tenant_id="acme", username="hamza", password=hash_password("password")))
     # Keep the local demo usable without recreating the insecure gateway
     # fallback. This data is never seeded when local auth is disabled.
     if not db.query(TenantPolicy).filter(
@@ -294,7 +337,15 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> dict:
     """Authenticates user and returns a JWT token."""
     if not LOCAL_AUTH_ENABLED:
         raise HTTPException(status_code=404, detail="Local authentication is disabled")
-    user = db.query(User).filter(User.username == body.username, User.password == body.password).first()
+    user = db.query(User).filter(User.username == body.username).first()
+    if not user or not verify_password(body.password, user.password):
+        # Migrate legacy development rows that stored a plaintext password.
+        if user and hmac.compare_digest(user.password, body.password):
+            user.password = hash_password(body.password)
+            db.commit()
+        else:
+            raise HTTPException(status_code=401, detail="Invalid username or password")
+
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
@@ -327,4 +378,3 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> dict:
             "roles": roles,
         },
     }
-

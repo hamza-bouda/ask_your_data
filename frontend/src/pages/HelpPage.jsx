@@ -1,5 +1,5 @@
 import React from 'react';
-import { HelpCircle, Database, Lock, Search, PlayCircle } from 'lucide-react';
+import { Lock, Search, PlayCircle } from 'lucide-react';
 
 export default function HelpPage() {
   return (
@@ -10,7 +10,7 @@ export default function HelpPage() {
       </header>
 
       <div className="page-content" style={{ display: 'grid', gap: '32px' }}>
-        
+
         <section className="glass-panel" style={{ padding: '32px' }}>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px', color: 'var(--text-main)' }}>
             <PlayCircle size={24} color="var(--accent)" /> Premiers pas

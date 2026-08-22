@@ -1,13 +1,12 @@
-"""Data Catalog Search Logic (Mock Version).
+"""Client for the tenant-scoped Data Catalog service.
 
-In a real implementation, this would use a Vector Store (e.g. pgvector, Qdrant) 
-or an Elasticsearch index to find the most relevant tables and columns for a given query.
-Here we return a static dummy schema for testing.
+All schema context comes from the live catalog API. There is deliberately no
+static fallback schema in this runtime module: tests must provide an explicit
+mock HTTP response or run the catalog service.
 """
 
 import os
 import requests
-from typing import Any
 from pydantic import BaseModel
 
 
@@ -25,30 +24,6 @@ class TableMeta(BaseModel):
 
 class CatalogSearchResult(BaseModel):
     tables: list[TableMeta]
-
-
-# Mock schema representing an e-commerce database
-MOCK_SCHEMA = [
-    TableMeta(
-        name="users",
-        description="Registered users of the platform",
-        columns=[
-            ColumnMeta(name="id", type="uuid", description="Primary key"),
-            ColumnMeta(name="created_at", type="timestamp", description="Registration date"),
-            ColumnMeta(name="country", type="varchar", description="User's country"),
-        ]
-    ),
-    TableMeta(
-        name="sales",
-        description="Completed transactions and orders",
-        columns=[
-            ColumnMeta(name="id", type="uuid", description="Primary key"),
-            ColumnMeta(name="user_id", type="uuid", description="Buyer ID"),
-            ColumnMeta(name="amount", type="decimal", description="Total purchase amount"),
-            ColumnMeta(name="date", type="timestamp", description="Date of transaction"),
-        ]
-    ),
-]
 
 
 CATALOG_URL = os.getenv("CATALOG_URL", "http://catalog:8002")

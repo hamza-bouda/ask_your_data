@@ -14,7 +14,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('recharts')) return 'vendor-recharts';
+            if (id.includes('echarts')) return 'vendor-echarts';
             if (id.includes('react-router-dom') || id.includes('@remix-run')) return 'vendor-router';
             if (id.includes('react') || id.includes('react-dom')) return 'vendor-react';
             if (id.includes('lucide-react')) return 'vendor-icons';

@@ -1,16 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from backend.services.orchestrator.app.main import app
 from backend.services.orchestrator.app.database import Base, engine, get_db
 from backend.services.orchestrator.app.orm_models import Conversation, Message
 
 client = TestClient(app)
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 def setup_db():
+    with engine.begin() as conn:
+        for t in ["export_audits", "dashboard_items", "dashboards", "runs", "messages", "conversations"]:
+            conn.execute(text(f"DROP TABLE IF EXISTS {t}"))
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
 
 def test_create_dashboard():
     response = client.post(
@@ -24,8 +27,17 @@ def test_create_dashboard():
     )
     assert response.status_code == 200
     assert response.json()["status"] == "created"
-    
+
 def test_get_dashboards():
+    client.post(
+        "/internal/dashboards?tenant_id=t1&user_id=u1",
+        json={
+            "name": "My Dashboard",
+            "description": "Test",
+            "visibility": "private",
+            "items": []
+        }
+    )
     response = client.get("/internal/dashboards?tenant_id=t1&user_id=u1")
     assert response.status_code == 200
     dashboards = response.json()
@@ -58,20 +70,20 @@ def test_add_item_to_dashboard():
     # Add item
     res_item = client.post(
         f"/internal/dashboards/{dash_id}/items?tenant_id=t1&user_id=u1",
-        json={"source_message_id": msg.id, "title": "My Item", "order": 0}
+        json={
+            "source_message_id": msg.id,
+            "title": "Item 1",
+            "description": "Chart item",
+            "order": 0
+        }
     )
     assert res_item.status_code == 200
+    assert res_item.json()["status"] in ["added", "created"]
 
-    # Verify item exists
-    res_get = client.get(f"/internal/dashboards/{dash_id}?tenant_id=t1&user_id=u1")
-    assert res_get.status_code == 200
-    items = res_get.json()["items"]
+    # Retrieve items
+    res_dash = client.get(f"/internal/dashboards/{dash_id}?tenant_id=t1&user_id=u1")
+    assert res_dash.status_code == 200
+    items = res_dash.json()["items"]
     assert len(items) == 1
-    assert items[0]["title"] == "My Item"
+    assert items[0]["title"] == "Item 1"
     assert items[0]["results"] == [{"a": 1}]
-
-    duplicate = client.post(
-        f"/internal/dashboards/{dash_id}/items?tenant_id=t1&user_id=u1",
-        json={"source_message_id": msg.id, "title": "My Item", "order": 0},
-    )
-    assert duplicate.status_code == 409

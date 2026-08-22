@@ -1,6 +1,6 @@
-# Ask Your Data — Docker Compose (Phase 01)
-# All services start as skeletons with /health and /ready endpoints.
-# Build context is the repo root so that packages/contracts is accessible.
+# Ask Your Data — Docker Compose development stack.
+# Build context is the repo root so that shared contracts and observability
+# packages are available to every service.
 
 services:
   # ── Infrastructure ─────────────────────────────────────────────
@@ -106,22 +106,6 @@ services:
     networks:
       - ayd
 
-  query-execution:
-    build:
-      context: ../../
-      dockerfile: backend/services/query_execution/Dockerfile
-    ports:
-      - "8003:8003"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - ayd
 
   orchestrator:
     build:

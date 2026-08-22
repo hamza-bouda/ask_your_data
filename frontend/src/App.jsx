@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
 import AppLayout from './components/layout/AppLayout';
 
-// Keep analytics-heavy pages out of the first paint. Recharts is then loaded
+// Keep analytics-heavy pages out of the first paint. ECharts is loaded
 // only when the user opens a conversation, result, or dashboard.
 const ConversationsPage = lazy(() => import('./pages/ConversationsPage'));
 const DataExplorerPage = lazy(() => import('./pages/DataExplorerPage'));

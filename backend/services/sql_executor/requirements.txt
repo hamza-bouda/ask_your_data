@@ -3,6 +3,7 @@ uvicorn[standard]>=0.30,<1
 pydantic>=2.7,<3
 sqlalchemy>=2.0,<3
 psycopg2-binary>=2.9,<3
+pymysql>=1.1,<2
+pymssql>=2.3,<3
 sqlglot>=23.0.0
 cryptography>=42.0.0
-

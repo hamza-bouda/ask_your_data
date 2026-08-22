@@ -1,17 +1,4 @@
-"""Contract tests — Phase 01 Definition of Done.
-
-Verifies that every service:
-1. Exposes GET /health → 200 with {status, service, version}
-2. Exposes GET /ready  → 200 with {ready, service}
-3. Returns ApiError on unknown routes (404)
-4. Includes X-Contract-Version header in every response
-
-Run against live Docker services:
-    pytest tests/contracts/test_health_and_errors.py -v
-
-Or run against individual TestClient instances (no Docker needed):
-    pytest tests/contracts/test_health_and_errors.py -v -k "unit"
-"""
+"""Contract tests — Verify health, readiness and API contracts across all microservices."""
 
 from __future__ import annotations
 
@@ -19,42 +6,38 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-# ── Unit tests (no Docker required) ─────────────────────────────
-# Import each service's app and test it in-process.
-
 def _get_all_apps() -> list[tuple[str, TestClient]]:
     """Lazily import all service apps and wrap in TestClients."""
-    from app import main as _  # noqa: F401 — ensure contracts is importable
-
     services = []
     service_modules = [
         ("gateway", "backend.services.gateway.app.main"),
         ("identity", "backend.services.identity.app.main"),
         ("catalog", "backend.services.catalog.app.main"),
-        ("query_execution", "backend.services.query_execution.app.main"),
         ("orchestrator", "backend.services.orchestrator.app.main"),
         ("visualization", "backend.services.visualization.app.main"),
+        ("sql_executor", "backend.services.sql_executor.app.main"),
+        ("semantic_router", "backend.services.semantic_router.app.main"),
+        ("sql_generator", "backend.services.sql_generator.app.main"),
     ]
     for name, module_path in service_modules:
         try:
             import importlib
             mod = importlib.import_module(module_path)
             services.append((name, TestClient(mod.app)))
-        except ImportError:
+        except Exception:
             pass
     return services
 
-
-# For simpler testing, we test each service individually via its app
-# directly, which doesn't require Docker.
 
 @pytest.fixture(params=[
     "gateway",
     "identity",
     "catalog",
-    "query_execution",
     "orchestrator",
     "visualization",
+    "sql_executor",
+    "semantic_router",
+    "sql_generator",
 ])
 def service_client(request: pytest.FixtureRequest) -> tuple[str, TestClient]:
     """Create a TestClient for each service."""
@@ -63,9 +46,11 @@ def service_client(request: pytest.FixtureRequest) -> tuple[str, TestClient]:
         "gateway": "backend.services.gateway.app.main",
         "identity": "backend.services.identity.app.main",
         "catalog": "backend.services.catalog.app.main",
-        "query_execution": "backend.services.query_execution.app.main",
         "orchestrator": "backend.services.orchestrator.app.main",
         "visualization": "backend.services.visualization.app.main",
+        "sql_executor": "backend.services.sql_executor.app.main",
+        "semantic_router": "backend.services.semantic_router.app.main",
+        "sql_generator": "backend.services.sql_generator.app.main",
     }
     import importlib
     mod = importlib.import_module(module_map[service_name])
@@ -128,17 +113,15 @@ class TestErrorContract:
         assert "X-Contract-Version" in resp.headers, f"{name} 404 missing X-Contract-Version header"
 
 
-# ── Integration tests (Docker required) ─────────────────────────
-# These tests hit the actual running containers.
-# Run with: pytest tests/contracts/test_health_and_errors.py -v -k "integration"
-
 DOCKER_SERVICES = {
     "gateway": "http://localhost:8000",
     "identity": "http://localhost:8001",
     "catalog": "http://localhost:8002",
-    "query-execution": "http://localhost:8003",
     "orchestrator": "http://localhost:8004",
     "visualization": "http://localhost:8005",
+    "sql-generator": "http://localhost:8006",
+    "sql-executor": "http://localhost:8007",
+    "semantic-router": "http://localhost:8008",
 }
 
 
@@ -154,7 +137,10 @@ class TestIntegrationHealth:
     def test_integration_health(self, docker_service: tuple[str, str]) -> None:
         import httpx
         name, base_url = docker_service
-        resp = httpx.get(f"{base_url}/health", timeout=5)
+        try:
+            resp = httpx.get(f"{base_url}/health", timeout=2)
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pytest.skip(f"{name} is not running on {base_url}")
         assert resp.status_code == 200, f"{name} /health returned {resp.status_code}"
         body = resp.json()
         assert body["status"] == "ok"
@@ -164,14 +150,20 @@ class TestIntegrationHealth:
     def test_integration_ready(self, docker_service: tuple[str, str]) -> None:
         import httpx
         name, base_url = docker_service
-        resp = httpx.get(f"{base_url}/ready", timeout=5)
+        try:
+            resp = httpx.get(f"{base_url}/ready", timeout=2)
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pytest.skip(f"{name} is not running on {base_url}")
         assert resp.status_code == 200
 
     @pytest.mark.integration
     def test_integration_404_error_format(self, docker_service: tuple[str, str]) -> None:
         import httpx
         name, base_url = docker_service
-        resp = httpx.get(f"{base_url}/nonexistent", timeout=5)
+        try:
+            resp = httpx.get(f"{base_url}/nonexistent", timeout=2)
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pytest.skip(f"{name} is not running on {base_url}")
         assert resp.status_code == 404
         body = resp.json()
         assert "code" in body

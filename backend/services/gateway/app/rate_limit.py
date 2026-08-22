@@ -16,13 +16,19 @@ async def init_redis() -> None:
     """Initialize the global Redis client."""
     global _redis_client
     if _redis_client is None:
-        _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        try:
+            _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        except Exception:
+            _redis_client = None
 
 async def close_redis() -> None:
     """Close the global Redis client."""
     global _redis_client
     if _redis_client is not None:
-        await _redis_client.aclose()
+        try:
+            await _redis_client.aclose()
+        except Exception:
+            pass
         _redis_client = None
 
 def get_redis() -> redis.Redis:
@@ -32,13 +38,17 @@ def get_redis() -> redis.Redis:
 
 async def check_rate_limit(user_id: str, action: str = "chat", tenant_id: str | None = None) -> None:
     """Check if the given user/tenant has exceeded the rate limit.
-    
+
     Uses a simple sliding window approach stored in Redis.
     Raises HTTPException 429 if the limit is exceeded.
     """
-    client = get_redis()
+    try:
+        client = get_redis()
+    except RuntimeError:
+        return
+
     now = int(time.time())
-    
+
     # Standard per-minute rate limit for chat and generic actions
     if action == "chat":
         window_start = now - 60
@@ -68,25 +78,31 @@ async def check_rate_limit(user_id: str, action: str = "chat", tenant_id: str | 
         key = f"rate_limit:default:{user_id}"
         limit = 60
         expiry = 60
-    
-    # Use a Redis pipeline for atomic execution
-    async with client.pipeline(transaction=True) as pipe:
-        # Remove timestamps older than the window
-        pipe.zremrangebyscore(key, "-inf", window_start)
-        # Add the current request
-        pipe.zadd(key, {str(now): now})
-        # Count the requests in the window
-        pipe.zcard(key)
-        # Set expiry on the key to avoid memory leaks
-        pipe.expire(key, expiry)
-        
-        results = await pipe.execute()
-        
-    request_count = results[2]
-    
-    if request_count > limit:
-        period = "minute" if expiry <= 60 else "day"
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit exceeded. Maximum {limit} requests per {period}."
-        )
+
+    try:
+        # Use a Redis pipeline for atomic execution
+        async with client.pipeline(transaction=True) as pipe:
+            # Remove timestamps older than the window
+            pipe.zremrangebyscore(key, "-inf", window_start)
+            # Add the current request
+            pipe.zadd(key, {str(now): now})
+            # Count the requests in the window
+            pipe.zcard(key)
+            # Set expiry on the key to avoid memory leaks
+            pipe.expire(key, expiry)
+
+            results = await pipe.execute()
+
+        request_count = results[2]
+
+        if request_count > limit:
+            period = "minute" if expiry <= 60 else "day"
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded. Maximum {limit} requests per {period}."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        # Fail open if Redis has network / operational errors
+        return

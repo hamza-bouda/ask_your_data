@@ -301,6 +301,10 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
                     "results": final_state.results,
                     "chart_spec": final_state.chart_spec,
                     "sql_query": final_state.sql_query,
+                    "executive_summary": final_state.executive_summary,
+                    "key_insights": final_state.key_insights or [],
+                    "warnings": final_state.warnings or [],
+                    "suggested_followups": final_state.suggested_followups or [],
                     "clarification_options": final_state.clarification_options,
                     "error_message": final_state.error_message
                 }

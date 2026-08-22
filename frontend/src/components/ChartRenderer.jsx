@@ -1,49 +1,76 @@
-import React, { useId, useState, useMemo } from 'react';
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-  AreaChart,
-  Area,
-  ScatterChart,
-  Scatter,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-} from 'recharts';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import * as echarts from 'echarts';
 import { AlertCircle, BarChart3, Table as TableIcon, Settings2 } from 'lucide-react';
 
 const PALETTES = {
-  standard: ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'],
-  high_contrast: ['#000000', '#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7'],
-  monochrome: ['#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1'],
+  standard: ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6', '#f97316', '#ef4444'],
+  high_contrast: ['#2563eb', '#d97706', '#059669', '#dc2626', '#7c3aed', '#db2777', '#0891b2', '#4b5563'],
+  monochrome: ['#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0'],
 };
 
 const formatValue = (val, format) => {
-  if (typeof val !== 'number') return val;
+  if (typeof val !== 'number') return val ?? '-';
   if (format === 'compact') return Intl.NumberFormat('fr-FR', { notation: 'compact' }).format(val);
   if (format === 'currency') return Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(val);
   if (format === 'percent') return Intl.NumberFormat('fr-FR', { style: 'percent' }).format(val / 100);
-  return val.toLocaleString();
+  return val.toLocaleString('fr-FR');
 };
 
-const ChartRenderer = ({ data, chartSpec }) => {
+/**
+ * Reusable wrapper component for Apache ECharts instance with auto-resize.
+ */
+function EChartInstance({ option, height = '360px', theme = 'dark' }) {
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    if (!chartInstance.current) {
+      chartInstance.current = echarts.init(chartRef.current, theme === 'dark' ? 'dark' : undefined, {
+        renderer: 'svg',
+      });
+    }
+
+    chartInstance.current.setOption(option, true);
+
+    const resizeObserver = new ResizeObserver(() => {
+      chartInstance.current?.resize();
+    });
+    resizeObserver.observe(chartRef.current);
+
+    const handleWindowResize = () => {
+      chartInstance.current?.resize();
+    };
+    window.addEventListener('resize', handleWindowResize);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+      if (chartInstance.current) {
+        chartInstance.current.dispose();
+        chartInstance.current = null;
+      }
+    };
+  }, [option, theme]);
+
+  return (
+    <div
+      ref={chartRef}
+      style={{
+        width: '100%',
+        height,
+        minHeight: '280px',
+        backgroundColor: 'transparent',
+      }}
+    />
+  );
+}
+
+export default function ChartRenderer({ data, chartSpec }) {
+  // Unconditionally declared hooks at the top level
   const [viewMode, setViewMode] = useState('chart');
   const [selectedChartType, setSelectedChartType] = useState(null);
-  
-  // Customization State
   const [showSettings, setShowSettings] = useState(false);
   const [customTitle, setCustomTitle] = useState('');
   const [palette, setPalette] = useState('standard');
@@ -51,23 +78,26 @@ const ChartRenderer = ({ data, chartSpec }) => {
   const [showLegend, setShowLegend] = useState(true);
   const [numberFormat, setNumberFormat] = useState('standard');
   const [sortOrder, setSortOrder] = useState('none');
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const chartId = useId().replace(/:/g, '');
-  const areaGradientId = `areaGrad-${chartId}`;
-  const barGradientId = `barGrad-${chartId}`;
+  const rawData = useMemo(() => data || [], [data]);
+  const rowsPerPage = 100;
 
-  if (!data || data.length === 0) return null;
+  const generatedSpec = useMemo(
+    () => chartSpec || { chart_type: 'table', title: 'Résultats', warnings: [] },
+    [chartSpec],
+  );
+  const spec = useMemo(
+    () => (selectedChartType ? { ...generatedSpec, chart_type: selectedChartType } : generatedSpec),
+    [generatedSpec, selectedChartType],
+  );
 
-  const generatedSpec = chartSpec || { chart_type: 'table', title: 'Résultats', warnings: [] };
-  const spec = selectedChartType ? { ...generatedSpec, chart_type: selectedChartType } : generatedSpec;
-  const isTableForced = spec.chart_type === 'table';
-  const canChooseChart = Boolean(generatedSpec.x_field && generatedSpec.y_field);
-  
   const colors = PALETTES[palette] || PALETTES.standard;
-  const titleToDisplay = customTitle || spec.title;
+  const titleToDisplay = customTitle || spec.title || 'Visualisation';
 
   const processedData = useMemo(() => {
-    let d = [...data];
+    if (!rawData.length) return [];
+    let d = [...rawData];
     if (sortOrder !== 'none' && spec.y_field) {
       d.sort((a, b) => {
         const valA = Number(a[spec.y_field] ?? 0);
@@ -76,12 +106,367 @@ const ChartRenderer = ({ data, chartSpec }) => {
       });
     }
     return d;
-  }, [data, sortOrder, spec.y_field]);
+  }, [rawData, sortOrder, spec.y_field]);
 
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 100;
+  // Build Apache ECharts Option based on spec and processed data
+  const echartsOption = useMemo(() => {
+    if (!processedData.length) return {};
+
+    const chartType = spec.chart_type;
+    const xField = spec.x_field || (Object.keys(processedData[0] || {})[0] || 'x');
+    const yField = spec.y_field || (Object.keys(processedData[0] || {})[1] || 'y');
+
+    const xValues = processedData.map((row) => String(row[xField] ?? ''));
+    const yValues = processedData.map((row) => Number(row[yField] ?? 0));
+
+    const baseConfig = {
+      backgroundColor: 'transparent',
+      color: colors,
+      animationDuration: 750,
+      textStyle: {
+        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+        color: '#94a3b8',
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#1e293b',
+        borderColor: '#334155',
+        textStyle: { color: '#f8fafc' },
+        formatter: (params) => {
+          if (!Array.isArray(params) || !params.length) return '';
+          const item = params[0];
+          return `<div style="font-weight:600;margin-bottom:4px">${item.name}</div>
+                  <div>${item.marker} ${yField}: <b>${formatValue(item.value, numberFormat)}</b></div>`;
+        },
+      },
+      grid: {
+        top: 40,
+        left: '3%',
+        right: '4%',
+        bottom: showAxes ? 40 : 15,
+        containLabel: true,
+      },
+      toolbox: {
+        show: true,
+        feature: {
+          saveAsImage: { show: true, title: 'Télécharger PNG' },
+          dataView: { show: false },
+        },
+        iconStyle: { borderColor: '#64748b' },
+        right: 15,
+        top: 0,
+      },
+    };
+
+    if (showLegend && ['pie', 'donut', 'stacked_bar', 'radar'].includes(chartType)) {
+      baseConfig.legend = {
+        show: true,
+        orient: 'horizontal',
+        bottom: 0,
+        textStyle: { color: '#94a3b8' },
+      };
+    }
+
+    switch (chartType) {
+      case 'line':
+      case 'area': {
+        const isArea = chartType === 'area';
+        return {
+          ...baseConfig,
+          xAxis: {
+            type: 'category',
+            data: xValues,
+            show: showAxes,
+            axisLine: { lineStyle: { color: '#334155' } },
+            axisLabel: { color: '#94a3b8', rotate: xValues.length > 8 ? 30 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            show: showAxes,
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+            axisLabel: {
+              color: '#94a3b8',
+              formatter: (val) => formatValue(val, numberFormat === 'standard' ? 'compact' : numberFormat),
+            },
+          },
+          series: [
+            {
+              name: yField,
+              type: 'line',
+              smooth: true,
+              data: yValues,
+              itemStyle: { color: colors[0] },
+              lineStyle: { width: 3, color: colors[0] },
+              areaStyle: isArea
+                ? {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                      { offset: 0, color: colors[0] + '88' },
+                      { offset: 1, color: colors[0] + '05' },
+                    ]),
+                  }
+                : undefined,
+              symbolSize: 6,
+            },
+          ],
+        };
+      }
+
+      case 'horizontal_bar': {
+        return {
+          ...baseConfig,
+          xAxis: {
+            type: 'value',
+            show: showAxes,
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+            axisLabel: {
+              color: '#94a3b8',
+              formatter: (val) => formatValue(val, numberFormat === 'standard' ? 'compact' : numberFormat),
+            },
+          },
+          yAxis: {
+            type: 'category',
+            data: xValues,
+            show: showAxes,
+            inverse: true,
+            axisLine: { lineStyle: { color: '#334155' } },
+            axisLabel: { color: '#94a3b8' },
+          },
+          series: [
+            {
+              name: yField,
+              type: 'bar',
+              data: yValues,
+              itemStyle: {
+                borderRadius: [0, 6, 6, 0],
+                color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                  { offset: 0, color: colors[0] },
+                  { offset: 1, color: colors[1] || colors[0] },
+                ]),
+              },
+            },
+          ],
+        };
+      }
+
+      case 'pie':
+      case 'donut': {
+        const isDonut = chartType === 'donut';
+        const pieData = processedData.map((row) => ({
+          name: String(row[xField] ?? 'Autre'),
+          value: Number(row[yField] ?? 0),
+        }));
+
+        return {
+          ...baseConfig,
+          tooltip: {
+            trigger: 'item',
+            backgroundColor: '#1e293b',
+            borderColor: '#334155',
+            textStyle: { color: '#f8fafc' },
+            formatter: (item) =>
+              `<b>${item.name}</b><br/>${yField}: ${formatValue(item.value, numberFormat)} (${item.percent}%)`,
+          },
+          series: [
+            {
+              name: yField,
+              type: 'pie',
+              radius: isDonut ? ['48%', '75%'] : '70%',
+              center: ['50%', '50%'],
+              avoidLabelOverlap: true,
+              itemStyle: {
+                borderRadius: 4,
+                borderColor: '#0f172a',
+                borderWidth: 2,
+              },
+              label: {
+                show: true,
+                color: '#cbd5e1',
+                formatter: '{b}: {d}%',
+              },
+              data: pieData,
+            },
+          ],
+        };
+      }
+
+      case 'scatter': {
+        const numericKeys = Object.keys(processedData[0] || {}).filter(
+          (k) => typeof processedData[0][k] === 'number'
+        );
+        const xNumField = numericKeys[0] || xField;
+        const yNumField = numericKeys[1] || yField;
+        const scatterData = processedData.map((row) => [
+          Number(row[xNumField] ?? 0),
+          Number(row[yNumField] ?? 0),
+        ]);
+
+        return {
+          ...baseConfig,
+          tooltip: {
+            trigger: 'item',
+            backgroundColor: '#1e293b',
+            borderColor: '#334155',
+            formatter: (params) =>
+              `${xNumField}: <b>${formatValue(params.value[0], numberFormat)}</b><br/>` +
+              `${yNumField}: <b>${formatValue(params.value[1], numberFormat)}</b>`,
+          },
+          xAxis: {
+            type: 'value',
+            name: xNumField,
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+          },
+          yAxis: {
+            type: 'value',
+            name: yNumField,
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+          },
+          series: [
+            {
+              type: 'scatter',
+              data: scatterData,
+              symbolSize: 12,
+              itemStyle: { color: colors[0], opacity: 0.85 },
+            },
+          ],
+        };
+      }
+
+      case 'radar': {
+        const maxVal = Math.max(...yValues, 10);
+        const indicators = xValues.map((name) => ({ name, max: maxVal * 1.15 }));
+        return {
+          ...baseConfig,
+          tooltip: { trigger: 'item' },
+          radar: {
+            indicator: indicators,
+            shape: 'polygon',
+            splitArea: { show: false },
+            axisLine: { lineStyle: { color: '#334155' } },
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } },
+          },
+          series: [
+            {
+              type: 'radar',
+              data: [
+                {
+                  value: yValues,
+                  name: yField,
+                  areaStyle: { color: colors[0] + '44' },
+                  lineStyle: { color: colors[0], width: 2 },
+                  itemStyle: { color: colors[0] },
+                },
+              ],
+            },
+          ],
+        };
+      }
+
+      case 'stacked_bar': {
+        const keys = Object.keys(processedData[0] || {}).filter((k) => k !== xField);
+        const seriesList = keys.map((k, idx) => ({
+          name: k,
+          type: 'bar',
+          stack: 'total',
+          data: processedData.map((row) => Number(row[k] ?? 0)),
+          itemStyle: { color: colors[idx % colors.length] },
+        }));
+
+        return {
+          ...baseConfig,
+          xAxis: { type: 'category', data: xValues },
+          yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } } },
+          series: seriesList,
+        };
+      }
+
+      case 'waterfall': {
+        const baseValues = [];
+        let runningTotal = 0;
+        const barHeights = [];
+        for (const v of yValues) {
+          baseValues.push(runningTotal);
+          runningTotal += v;
+          barHeights.push(Math.abs(v));
+        }
+
+        return {
+          ...baseConfig,
+          xAxis: { type: 'category', data: xValues },
+          yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } } },
+          series: [
+            {
+              name: 'Placeholder',
+              type: 'bar',
+              stack: 'Total',
+              itemStyle: { borderColor: 'transparent', color: 'transparent' },
+              data: baseValues,
+            },
+            {
+              name: yField,
+              type: 'bar',
+              stack: 'Total',
+              data: barHeights,
+              itemStyle: {
+                color: (param) => (yValues[param.dataIndex] >= 0 ? '#10b981' : '#ef4444'),
+                borderRadius: 4,
+              },
+            },
+          ],
+        };
+      }
+
+      case 'heatmap':
+      case 'histogram':
+      case 'bar':
+      default: {
+        return {
+          ...baseConfig,
+          xAxis: {
+            type: 'category',
+            data: xValues,
+            show: showAxes,
+            axisLine: { lineStyle: { color: '#334155' } },
+            axisLabel: { color: '#94a3b8', rotate: xValues.length > 6 ? 30 : 0 },
+          },
+          yAxis: {
+            type: 'value',
+            show: showAxes,
+            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+            axisLabel: {
+              color: '#94a3b8',
+              formatter: (val) => formatValue(val, numberFormat === 'standard' ? 'compact' : numberFormat),
+            },
+          },
+          series: [
+            {
+              name: yField,
+              type: 'bar',
+              data: yValues,
+              itemStyle: {
+                borderRadius: [6, 6, 0, 0],
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: colors[0] },
+                  { offset: 1, color: colors[1] || colors[0] },
+                ]),
+              },
+            },
+          ],
+        };
+      }
+    }
+  }, [processedData, spec, colors, showAxes, showLegend, numberFormat]);
+
+  // Early return for empty data AFTER all hooks are called
+  if (!rawData || rawData.length === 0) {
+    return null;
+  }
+
+  const isTableForced = spec.chart_type === 'table';
+  const isMetric = spec.chart_type === 'metric';
+  const canChooseChart = Boolean(generatedSpec.x_field && generatedSpec.y_field);
 
   const renderTable = () => {
+    if (!processedData.length) return null;
     const keys = Object.keys(processedData[0]);
     const totalPages = Math.ceil(processedData.length / rowsPerPage);
     const startIndex = (currentPage - 1) * rowsPerPage;
@@ -89,19 +474,47 @@ const ChartRenderer = ({ data, chartSpec }) => {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
-        <div style={{ overflowX: 'auto' }} role="region" aria-label="Tableau de données" tabIndex="0">
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+        <div
+          style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}
+          role="region"
+          aria-label="Tableau de données"
+          tabIndex="0"
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.88rem' }}>
             <thead>
-              <tr>
-                {keys.map((k) => <th key={k} scope="col" style={{ padding: '8px', borderBottom: '2px solid var(--border-color)', color: 'var(--text-main)' }}>{k}</th>)}
+              <tr style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                {keys.map((k) => (
+                  <th
+                    key={k}
+                    scope="col"
+                    style={{
+                      padding: '10px 14px',
+                      borderBottom: '1px solid rgba(255,255,255,0.1)',
+                      color: '#94a3b8',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {k}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {paginatedData.map((row, i) => (
-                <tr key={startIndex + i}>
+                <tr
+                  key={i}
+                  style={{
+                    borderBottom: '1px solid rgba(255,255,255,0.04)',
+                    backgroundColor: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+                  }}
+                >
                   {keys.map((k) => (
-                    <td key={k} style={{ padding: '8px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
-                      {typeof row[k] === 'number' ? formatValue(row[k], numberFormat) : String(row[k] ?? '')}
+                    <td key={k} style={{ padding: '8px 14px', color: '#e2e8f0' }}>
+                      {row[k] === null || row[k] === undefined
+                        ? '-'
+                        : typeof row[k] === 'number'
+                        ? formatValue(row[k], numberFormat)
+                        : String(row[k])}
                     </td>
                   ))}
                 </tr>
@@ -109,412 +522,347 @@ const ChartRenderer = ({ data, chartSpec }) => {
             </tbody>
           </table>
         </div>
+
         {totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '8px' }}>
-            <button 
-              className="btn-secondary" 
-              disabled={currentPage === 1} 
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              style={{ padding: '4px 12px', fontSize: '0.9rem' }}
-            >
-              Précédent
-            </button>
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Page {currentPage} sur {totalPages}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+            <span style={{ color: '#94a3b8' }}>
+              Affichage {startIndex + 1} à {Math.min(startIndex + rowsPerPage, processedData.length)} sur{' '}
+              {processedData.length}
             </span>
-            <button 
-              className="btn-secondary" 
-              disabled={currentPage === totalPages} 
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              style={{ padding: '4px 12px', fontSize: '0.9rem' }}
-            >
-              Suivant
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: 'none',
+                  color: 'white',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  opacity: currentPage === 1 ? 0.4 : 1,
+                }}
+              >
+                Précédent
+              </button>
+              <span style={{ color: '#cbd5e1', alignSelf: 'center' }}>
+                Page {currentPage} / {totalPages}
+              </span>
+              <button
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                style={{
+                  padding: '4px 10px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: 'none',
+                  color: 'white',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  opacity: currentPage === totalPages ? 0.4 : 1,
+                }}
+              >
+                Suivant
+              </button>
+            </div>
           </div>
         )}
       </div>
     );
   };
 
-  const renderChart = () => {
-    const { chart_type, x_field, y_field } = spec;
+  const renderMetric = () => {
+    const yField = spec.y_field || Object.keys(processedData[0] || {})[0];
+    const metricVal = processedData[0]?.[yField];
 
-    if (chart_type === 'metric') {
-      const val = processedData[0][y_field];
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ padding: '24px', backgroundColor: 'var(--background)', borderRadius: '12px', border: '1px solid var(--border)', textAlign: 'center', marginTop: '16px' }}>
-          <div style={{ fontSize: '36px', fontWeight: 'bold', color: colors[0] }}>
-            {formatValue(val, numberFormat)}
-          </div>
-          <div style={{ color: 'var(--text-muted)', marginTop: '8px' }}>{y_field}</div>
-        </div>
-      );
-    }
-    
-    if (chart_type === 'heatmap') {
-      const maxVal = Math.max(...processedData.map(d => Number(d[y_field] || 0)));
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ marginTop: '16px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-          {processedData.map((d, i) => {
-            const val = Number(d[y_field] || 0);
-            const intensity = maxVal > 0 ? val / maxVal : 0;
-            return (
-              <div key={i} title={`${d[x_field]}: ${formatValue(val, numberFormat)}`} style={{
-                padding: '12px',
-                minWidth: '80px',
-                textAlign: 'center',
-                backgroundColor: colors[0],
-                opacity: Math.max(0.1, intensity),
-                color: intensity > 0.5 ? '#fff' : 'inherit',
-                borderRadius: '4px',
-                fontSize: '12px',
-                border: '1px solid rgba(0,0,0,0.1)'
-              }}>
-                <div style={{ fontWeight: 'bold', opacity: 1 }}>{String(d[x_field]).slice(0, 10)}</div>
-                <div style={{ opacity: 1 }}>{formatValue(val, numberFormat)}</div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    if (chart_type === 'waterfall') {
-      let cumulative = 0;
-      const wfData = processedData.map(d => {
-        const val = Number(d[y_field] || 0);
-        const start = cumulative;
-        cumulative += val;
-        return {
-          ...d,
-          transparentBase: val >= 0 ? start : start + val,
-          positiveVal: val >= 0 ? val : 0,
-          negativeVal: val < 0 ? Math.abs(val) : 0,
-          rawVal: val
-        };
-      });
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={wfData} margin={{ top: 10, right: 20, left: 10, bottom: 50 }}>
-              {showAxes && <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />}
-              {showAxes && <XAxis dataKey={x_field} stroke="#94a3b8" fontSize={11} angle={-25} textAnchor="end" />}
-              {showAxes && <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => formatValue(v, numberFormat)} />}
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }}
-                formatter={(value, name, props) => [formatValue(props.payload.rawVal, numberFormat), y_field]}
-              />
-              <Bar dataKey="transparentBase" stackId="a" fill="transparent" />
-              <Bar dataKey="positiveVal" stackId="a" fill={colors[2] || '#10b981'} />
-              <Bar dataKey="negativeVal" stackId="a" fill={colors[4] || '#ef4444'} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    const commonProps = {
-      data: processedData,
-      margin: { top: 10, right: 20, left: 10, bottom: 50 }
-    };
-
-    const CommonAxes = () => (
-      <>
-        {showAxes && <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />}
-        {showAxes && <XAxis dataKey={x_field} stroke="#94a3b8" fontSize={11} angle={-25} textAnchor="end" />}
-        {showAxes && <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => formatValue(v, numberFormat)} />}
-        <Tooltip
-          contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }}
-          formatter={(value) => formatValue(value, numberFormat)}
-        />
-        {showLegend && <Legend wrapperStyle={{ color: '#94a3b8', fontSize: '13px', paddingTop: '10px' }} />}
-      </>
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '32px 16px',
+          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(59, 130, 246, 0.04))',
+          borderRadius: '12px',
+          border: '1px solid rgba(99, 102, 241, 0.2)',
+          margin: '16px 0',
+        }}
+      >
+        <span style={{ fontSize: '0.9rem', color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {titleToDisplay}
+        </span>
+        <span style={{ fontSize: '2.75rem', fontWeight: 800, color: '#60a5fa', letterSpacing: '-0.02em' }}>
+          {typeof metricVal === 'number' ? formatValue(metricVal, numberFormat) : String(metricVal ?? '-')}
+        </span>
+        {spec.reason && (
+          <span style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '8px' }}>
+            {spec.reason}
+          </span>
+        )}
+      </div>
     );
-
-    if (chart_type === 'pie' || chart_type === 'donut') {
-      const pieData = processedData.length > 12
-        ? [
-            ...[...processedData].sort((a, b) => Number(b[y_field] ?? 0) - Number(a[y_field] ?? 0)).slice(0, 11),
-            {
-              [x_field]: 'Autres',
-              [y_field]: [...processedData].sort((a, b) => Number(b[y_field] ?? 0) - Number(a[y_field] ?? 0)).slice(11).reduce((total, row) => total + Number(row[y_field] ?? 0), 0),
-            },
-          ]
-        : processedData;
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={pieData}
-                dataKey={y_field}
-                nameKey={x_field}
-                cx="50%"
-                cy="50%"
-                outerRadius={120}
-                innerRadius={chart_type === 'donut' ? 70 : 0}
-                paddingAngle={3}
-                label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                labelLine={pieData.length <= 12}
-              >
-                {pieData.map((_, i) => (
-                  <Cell key={i} fill={colors[i % colors.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }}
-                formatter={(value) => formatValue(value, numberFormat)}
-              />
-              {showLegend && <Legend wrapperStyle={{ color: '#94a3b8', fontSize: '13px', paddingTop: '10px' }} />}
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (chart_type === 'line') {
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart {...commonProps}>
-              <CommonAxes />
-              <Line type="monotone" dataKey={y_field} stroke={colors[0]} strokeWidth={3} dot={{ r: 4, fill: colors[0] }} activeDot={{ r: 6 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (chart_type === 'area') {
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart {...commonProps}>
-              <defs>
-                <linearGradient id={areaGradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={colors[0]} stopOpacity={0.7} />
-                  <stop offset="95%" stopColor={colors[0]} stopOpacity={0.05} />
-                </linearGradient>
-              </defs>
-              <CommonAxes />
-              <Area type="monotone" dataKey={y_field} stroke={colors[0]} fill={`url(#${areaGradientId})`} strokeWidth={3} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (chart_type === 'bar' || chart_type === 'stacked_bar' || chart_type === 'histogram') {
-      const isHistogram = chart_type === 'histogram';
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart {...commonProps} barCategoryGap={isHistogram ? 0 : '10%'}>
-              <defs>
-                <linearGradient id={barGradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={colors[0]} stopOpacity={1} />
-                  <stop offset="100%" stopColor={colors[1] || colors[0]} stopOpacity={0.8} />
-                </linearGradient>
-              </defs>
-              <CommonAxes />
-              <Bar 
-                dataKey={y_field} 
-                fill={`url(#${barGradientId})`} 
-                radius={isHistogram ? 0 : [6, 6, 0, 0]} 
-                stackId={chart_type === 'stacked_bar' ? "a" : undefined}
-                animationDuration={800} 
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (chart_type === 'horizontal_bar') {
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: Math.max(380, processedData.length * 38), marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={processedData} layout="vertical" margin={{ top: 10, right: 20, left: 90, bottom: 10 }}>
-              {showAxes && <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />}
-              {showAxes && <XAxis type="number" stroke="#94a3b8" fontSize={11} tickFormatter={(v) => formatValue(v, numberFormat)} />}
-              {showAxes && <YAxis type="category" dataKey={x_field} stroke="#94a3b8" fontSize={11} width={85} />}
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} formatter={(v) => formatValue(v, numberFormat)} />
-              {showLegend && <Legend />}
-              <Bar dataKey={y_field} fill={colors[0]} radius={[0, 6, 6, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (chart_type === 'scatter') {
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
-              {showAxes && <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />}
-              {showAxes && <XAxis type="number" dataKey={x_field} name={x_field} stroke="#94a3b8" tickFormatter={(v) => formatValue(v, numberFormat)} />}
-              {showAxes && <YAxis type="number" dataKey={y_field} name={y_field} stroke="#94a3b8" tickFormatter={(v) => formatValue(v, numberFormat)} />}
-              <Tooltip cursor={{ strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} formatter={(v) => formatValue(v, numberFormat)} />
-              {showLegend && <Legend />}
-              <Scatter data={processedData} fill={colors[0]} />
-            </ScatterChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (chart_type === 'radar') {
-      return (
-        <div role="img" aria-label={titleToDisplay} style={{ width: '100%', height: 380, marginTop: '16px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <RadarChart data={processedData}>
-              <PolarGrid stroke="rgba(255,255,255,0.15)" />
-              <PolarAngleAxis dataKey={x_field} stroke="#94a3b8" fontSize={11} />
-              <PolarRadiusAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => formatValue(v, numberFormat)} />
-              <Radar name={y_field} dataKey={y_field} stroke={colors[0]} fill={colors[0]} fillOpacity={0.55} />
-              <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} formatter={(v) => formatValue(v, numberFormat)} />
-              {showLegend && <Legend />}
-            </RadarChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    return renderTable();
   };
 
   return (
-    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div
+      className="chart-container"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        backgroundColor: '#0f172a',
+        borderRadius: '12px',
+        border: '1px solid rgba(255,255,255,0.08)',
+        padding: '16px 20px',
+        marginTop: '12px',
+      }}
+    >
+      {/* Header with Title and Mode Switcher */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <div>
-          <h4 style={{ margin: 0, color: 'var(--text)' }}>{titleToDisplay}</h4>
-          {spec.reason && <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>{spec.reason}</p>}
+          <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 600, color: '#f8fafc' }}>
+            {titleToDisplay}
+          </h4>
+          {spec.reason && !isMetric && (
+            <span style={{ fontSize: '0.78rem', color: '#64748b' }}>{spec.reason}</span>
+          )}
         </div>
-        
-        {(!isTableForced || canChooseChart) && (
-          <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--background)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setViewMode('chart')}
-              style={{
-                background: viewMode === 'chart' ? 'var(--border)' : 'transparent',
-                border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text)'
-              }}
-            >
-              <BarChart3 size={16} /> Graphique
-            </button>
-            <button
-              onClick={() => setViewMode('table')}
-              style={{
-                background: viewMode === 'table' ? 'var(--border)' : 'transparent',
-                border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text)'
-              }}
-            >
-              <TableIcon size={16} /> Tableau
-            </button>
-            {canChooseChart && (
-              <select
-                aria-label="Type de graphique"
-                value={selectedChartType || generatedSpec.chart_type}
-                onChange={(event) => {
-                  const chartType = event.target.value;
-                  setSelectedChartType(chartType === generatedSpec.chart_type ? null : chartType);
-                  setViewMode(chartType === 'table' ? 'table' : 'chart');
+
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {!isTableForced && !isMetric && (
+            <div style={{ display: 'flex', background: 'rgba(255,255,255,0.06)', borderRadius: '6px', padding: '2px' }}>
+              <button
+                onClick={() => setViewMode('chart')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '5px 10px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  background: viewMode === 'chart' ? 'var(--accent, #6366f1)' : 'transparent',
+                  color: viewMode === 'chart' ? 'white' : '#94a3b8',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
                 }}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text)', padding: '6px', cursor: 'pointer' }}
               >
-                <option value="bar">Barres</option>
-                <option value="stacked_bar">Barres empilées</option>
-                <option value="horizontal_bar">Barres horizontales</option>
-                <option value="line">Ligne</option>
-                <option value="area">Aire</option>
-                <option value="pie">Secteurs</option>
-                <option value="donut">Anneau</option>
-                <option value="scatter">Nuage de points</option>
-                <option value="radar">Radar</option>
-                <option value="heatmap">Carte de chaleur</option>
-                <option value="waterfall">Cascade</option>
-                <option value="histogram">Histogramme</option>
-                <option value="table">Tableau</option>
-              </select>
-            )}
+                <BarChart3 size={14} />
+                Graphique
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '5px 10px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  background: viewMode === 'table' ? 'var(--accent, #6366f1)' : 'transparent',
+                  color: viewMode === 'table' ? 'white' : '#94a3b8',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                }}
+              >
+                <TableIcon size={14} />
+                Tableau
+              </button>
+            </div>
+          )}
+
+          {!isTableForced && (
             <button
               onClick={() => setShowSettings(!showSettings)}
-              aria-label="Personnaliser"
               style={{
-                background: showSettings ? 'var(--border)' : 'transparent',
-                border: 'none', padding: '6px', borderRadius: '6px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', color: 'var(--text)'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '6px',
+                background: showSettings ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#cbd5e1',
+                cursor: 'pointer',
               }}
+              title="Personnaliser la visualisation"
             >
               <Settings2 size={16} />
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
+      {/* Warnings */}
+      {spec.warnings && spec.warnings.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {spec.warnings.map((w, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.82rem',
+                color: '#f59e0b',
+                background: 'rgba(245, 158, 11, 0.1)',
+                padding: '6px 10px',
+                borderRadius: '6px',
+              }}
+            >
+              <AlertCircle size={14} />
+              <span>{w}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Settings Drawer */}
       {showSettings && (
-        <div style={{ padding: '16px', backgroundColor: 'var(--border)', borderRadius: '8px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-muted)' }}>Titre personnalisé</label>
-            <input 
-              type="text" 
-              value={customTitle} 
-              onChange={e => setCustomTitle(e.target.value)} 
-              placeholder={spec.title}
-              style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)', background: 'var(--background)', color: 'var(--text)' }}
+        <div
+          style={{
+            padding: '12px',
+            backgroundColor: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: '8px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '14px',
+            fontSize: '0.82rem',
+            color: '#cbd5e1',
+          }}
+        >
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            Titre personnalisé:
+            <input
+              type="text"
+              value={customTitle}
+              onChange={(e) => setCustomTitle(e.target.value)}
+              placeholder={spec.title || 'Titre du graphique'}
+              style={{
+                background: '#1e293b',
+                color: 'white',
+                border: '1px solid #334155',
+                borderRadius: '4px',
+                padding: '4px 8px',
+              }}
             />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-muted)' }}>Palette de couleurs</label>
-            <select value={palette} onChange={e => setPalette(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)', background: 'var(--background)', color: 'var(--text)' }}>
-              <option value="standard">Standard</option>
-              <option value="high_contrast">Haut contraste (A11y)</option>
+          </label>
+
+          {canChooseChart && (
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              Type de graphique:
+              <select
+                value={selectedChartType || spec.chart_type}
+                onChange={(e) => setSelectedChartType(e.target.value)}
+                style={{
+                  background: '#1e293b',
+                  color: 'white',
+                  border: '1px solid #334155',
+                  borderRadius: '4px',
+                  padding: '4px 8px',
+                }}
+              >
+                <option value="bar">Barres verticales</option>
+                <option value="horizontal_bar">Barres horizontales</option>
+                <option value="line">Ligne</option>
+                <option value="area">Aire</option>
+                <option value="pie">Camembert</option>
+                <option value="donut">Donut (Anneau)</option>
+                <option value="scatter">Nuage de points</option>
+                <option value="radar">Radar</option>
+                <option value="stacked_bar">Barres empilées</option>
+                <option value="waterfall">Cascade</option>
+              </select>
+            </label>
+          )}
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            Palette de couleurs:
+            <select
+              value={palette}
+              onChange={(e) => setPalette(e.target.value)}
+              style={{
+                background: '#1e293b',
+                color: 'white',
+                border: '1px solid #334155',
+                borderRadius: '4px',
+                padding: '4px 8px',
+              }}
+            >
+              <option value="standard">Standard (Vibrant)</option>
+              <option value="high_contrast">Contraste élevé</option>
               <option value="monochrome">Monochrome</option>
             </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-muted)' }}>Format des nombres</label>
-            <select value={numberFormat} onChange={e => setNumberFormat(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)', background: 'var(--background)', color: 'var(--text)' }}>
-              <option value="standard">Standard</option>
-              <option value="compact">Compact (1K, 1M)</option>
-              <option value="currency">Devise (€)</option>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            Format des nombres:
+            <select
+              value={numberFormat}
+              onChange={(e) => setNumberFormat(e.target.value)}
+              style={{
+                background: '#1e293b',
+                color: 'white',
+                border: '1px solid #334155',
+                borderRadius: '4px',
+                padding: '4px 8px',
+              }}
+            >
+              <option value="standard">Standard (1 234)</option>
+              <option value="compact">Compact (1,2k)</option>
+              <option value="currency">Monétaire (€)</option>
               <option value="percent">Pourcentage (%)</option>
             </select>
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-muted)' }}>Tri</label>
-            <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)', background: 'var(--background)', color: 'var(--text)' }}>
-              <option value="none">Aucun</option>
-              <option value="asc">Croissant</option>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            Tri des valeurs:
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value)}
+              style={{
+                background: '#1e293b',
+                color: 'white',
+                border: '1px solid #334155',
+                borderRadius: '4px',
+                padding: '4px 8px',
+              }}
+            >
+              <option value="none">Par défaut</option>
               <option value="desc">Décroissant</option>
+              <option value="asc">Croissant</option>
             </select>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', justifyContent: 'center' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text)' }}>
-              <input type="checkbox" checked={showAxes} onChange={e => setShowAxes(e.target.checked)} />
-              Afficher les axes
+          </label>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '16px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showAxes}
+                onChange={(e) => setShowAxes(e.target.checked)}
+              />
+              Axes visibles
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text)' }}>
-              <input type="checkbox" checked={showLegend} onChange={e => setShowLegend(e.target.checked)} />
-              Afficher la légende
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showLegend}
+                onChange={(e) => setShowLegend(e.target.checked)}
+              />
+              Légende
             </label>
           </div>
         </div>
       )}
 
-      {spec.warnings && spec.warnings.length > 0 && (
-        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', borderRadius: '8px', fontSize: '12px' }}>
-          <AlertCircle size={16} />
-          <span>{spec.warnings[0]}</span>
-        </div>
+      {/* Main Content Area */}
+      {isMetric ? (
+        renderMetric()
+      ) : isTableForced || viewMode === 'table' ? (
+        renderTable()
+      ) : (
+        <EChartInstance option={echartsOption} height="360px" theme="dark" />
       )}
-
-      {isTableForced || viewMode === 'table' ? renderTable() : renderChart()}
     </div>
   );
-};
-
-export default ChartRenderer;
+}

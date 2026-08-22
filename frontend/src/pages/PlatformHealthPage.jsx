@@ -11,7 +11,7 @@ const PlatformHealthPage = () => {
     fetchHealthData();
   }, []);
 
-  const fetchHealthData = async () => {
+  async function fetchHealthData() {
     setLoading(true);
     setError(null);
     try {
@@ -27,7 +27,7 @@ const PlatformHealthPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Chargement des données...</div>;
@@ -37,14 +37,14 @@ const PlatformHealthPage = () => {
     <div className="p-8 max-w-6xl mx-auto space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-semibold text-gray-800">Santé de la plateforme</h1>
-        <button 
+        <button
           onClick={fetchHealthData}
           className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 transition-colors"
         >
           Rafraîchir
         </button>
       </div>
-      
+
       {error && (
         <div className="bg-red-50 border-l-4 border-red-500 p-4 text-red-700">
           <p>{error}</p>

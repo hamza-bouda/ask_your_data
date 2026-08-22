@@ -12,8 +12,15 @@ E2E_DB_URL = os.getenv("E2E_DB_URL", "postgresql://askyourdata:askyourdata_dev@p
 
 @pytest.fixture(scope="module")
 def api_client():
-    with httpx.Client(base_url=GATEWAY_URL, timeout=30.0) as client:
-        yield client
+    client = httpx.Client(base_url=GATEWAY_URL, timeout=5.0)
+    try:
+        resp = client.get("/health")
+        if resp.status_code != 200:
+            pytest.skip("Gateway service is not healthy or running.")
+    except (httpx.ConnectError, httpx.TimeoutException):
+        pytest.skip(f"Gateway service is not running on {GATEWAY_URL}")
+    yield client
+    client.close()
 
 
 @pytest.fixture(scope="module")

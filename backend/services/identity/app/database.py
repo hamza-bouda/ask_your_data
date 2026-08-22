@@ -10,9 +10,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
 
 try:
-    from app.config import DATABASE_URL
-except ImportError:
-    from backend.services.identity.app.config import DATABASE_URL
+    from .config import DATABASE_URL
+except (ImportError, ValueError):
+    try:
+        from backend.services.identity.app.config import DATABASE_URL
+    except ImportError:
+        from app.config import DATABASE_URL
 
 
 class Base(DeclarativeBase):
@@ -44,4 +47,18 @@ def get_db() -> Session:
 
 def create_tables() -> None:
     """Create all tables. Called at service startup."""
+    try:
+        from app import models
+    except ImportError:
+        try:
+            from backend.services.identity.app import models
+        except ImportError:
+            pass
     Base.metadata.create_all(bind=engine)
+
+import os
+if os.getenv("TESTING") == "1":
+    try:
+        create_tables()
+    except Exception:
+        pass

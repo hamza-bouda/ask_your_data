@@ -17,11 +17,11 @@
     "@dnd-kit/utilities": "^3.2.2",
     "axios": "^1.19.0",
     "clsx": "^2.1.1",
+    "echarts": "^6.1.0",
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.2",
-    "recharts": "^3.10.1"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",

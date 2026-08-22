@@ -72,9 +72,6 @@ services:
       FERNET_KEY: ${FERNET_KEY:?set FERNET_KEY}
     ports: !reset []
 
-  query-execution:
-    ports: !reset []
-
   visualization:
     ports: !reset []
 

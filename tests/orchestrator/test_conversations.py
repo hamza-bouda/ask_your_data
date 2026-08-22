@@ -2,6 +2,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
+from sqlalchemy import text
 
 os.environ["TESTING"] = "1"
 
@@ -13,9 +14,11 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_db():
+    with engine.begin() as conn:
+        for t in ["export_audits", "dashboard_items", "dashboards", "runs", "messages", "conversations"]:
+            conn.execute(text(f"DROP TABLE IF EXISTS {t}"))
     Base.metadata.create_all(bind=engine)
     yield
-    Base.metadata.drop_all(bind=engine)
 
 
 def test_create_conversation():
@@ -52,43 +55,30 @@ def test_get_conversation_with_messages():
     assert data["conversation"]["id"] == conv_id
     assert len(data["messages"]) == 0
 
-@patch("backend.services.orchestrator.app.main.orchestrator_graph")
-def test_send_message_and_graph_execution(mock_graph):
-    # Setup mock for LangGraph
-    mock_graph.invoke.return_value = {
-        "tenant_id": "t1",
-        "user_id": "u1",
-        "conversation_id": "some_id",
-        "question": "Show me data",
-        "run_id": "run1",
-        "status": "executed",
-        "results": [{"val": 100}],
-        "semantic_plan": {"intent": "DATA_QUERY"},
-        "sql_query": "SELECT 100 as val",
-        "error_message": None,
-        "clarification_options": None
-    }
+class MockRedis:
+    async def xadd(self, stream, payload):
+        pass
 
-    conv_resp = client.post("/internal/conversations", json={"tenant_id": "t1", "user_id": "u1"})
+@patch("backend.services.orchestrator.app.main.get_redis_client", return_value=MockRedis())
+def test_send_message_and_graph_execution(mock_redis):
+    # Create conv
+    conv_resp = client.post("/internal/conversations", json={"tenant_id": "t1", "user_id": "u1", "title": "Chat"})
     conv_id = conv_resp.json()["id"]
 
+    # Send message (asynchronous background queueing)
     resp = client.post(f"/internal/conversations/{conv_id}/messages", json={
         "tenant_id": "t1",
         "user_id": "u1",
-        "message": "Show me data"
+        "message": "What are sales?"
     })
-    
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "executed"
-    assert data["results"] == [{"val": 100}]
+    assert data["status"] == "pending"
+    assert "run_id" in data
 
-    # Check persistence
-    resp2 = client.get(f"/internal/conversations/{conv_id}", params={"tenant_id": "t1", "user_id": "u1"})
-    data2 = resp2.json()
-    assert len(data2["messages"]) == 2 # 1 user, 1 assistant
-    assert data2["messages"][0]["role"] == "user"
-    assert data2["messages"][1]["role"] == "assistant"
-    
-    # Auto title should be set
-    assert data2["conversation"]["title"].startswith("Show me data")
+    # Verify message was stored in DB
+    db = next(get_db())
+    messages = db.query(Message).filter(Message.conversation_id == conv_id).all()
+    assert len(messages) >= 1
+    assert messages[0].content == "What are sales?"
+    assert messages[0].role == "user"

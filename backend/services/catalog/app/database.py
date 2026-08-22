@@ -2,10 +2,17 @@ import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# Connect to the local postgres container running pgvector
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://askyourdata:askyourdata_dev@postgres:5432/askyourdata")
+# Connect to postgres in prod/docker or sqlite in tests
+if os.getenv("TESTING") == "1":
+    DATABASE_URL = os.getenv("CATALOG_DATABASE_URL", os.getenv("DATABASE_URL", "sqlite:///./catalog_test.db"))
+else:
+    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://askyourdata:askyourdata_dev@postgres:5432/askyourdata")
 
-engine = create_engine(DATABASE_URL)
+_is_sqlite = DATABASE_URL.startswith("sqlite")
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if _is_sqlite else {},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -18,15 +25,22 @@ def get_db():
         db.close()
 
 def create_tables():
-    # Ensure pgvector extension exists
-    with engine.connect() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
+    if engine.dialect.name == "postgresql":
+        with engine.connect() as conn:
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                conn.commit()
+            except Exception:
+                pass
+    try:
+        from app import models
+    except ImportError:
+        try:
+            from backend.services.catalog.app import models
+        except ImportError:
+            pass
     Base.metadata.create_all(bind=engine)
 
-    # `create_all` only creates missing tables; it never evolves existing ones.
-    # Keep this additive compatibility migration until the project adopts a formal
-    # Alembic workflow, so a local upgrade does not require dropping tenant metadata.
     if engine.dialect.name != "postgresql":
         return
 
@@ -97,3 +111,9 @@ def create_tables():
             conn.execute(text(
                 f"UPDATE {table_name} SET source_id = tenant_id WHERE source_id IS NULL"
             ))
+
+if os.getenv("TESTING") == "1":
+    try:
+        create_tables()
+    except Exception:
+        pass

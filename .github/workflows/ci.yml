@@ -26,7 +26,7 @@ jobs:
       - name: Security Scan
         run: npm audit --audit-level=high || true
       - name: Unit Tests
-        run: npm run test:coverage
+        run: npm test
       - name: Build
         run: npm run build
 
@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install pip-audit
-      - run: pip-audit -r backend/services/visualization/requirements.txt -r backend/services/sql_executor/requirements.txt -r backend/services/semantic_router/requirements.txt -r backend/services/sql_generator/requirements.txt -r backend/services/orchestrator/requirements.txt || true
+      - run: pip-audit -r backend/services/visualization/requirements.txt -r backend/services/sql_executor/requirements.txt -r backend/services/semantic_router/requirements.txt -r backend/services/sql_generator/requirements.txt -r backend/services/orchestrator/requirements.txt -r backend/services/catalog/requirements.txt -r backend/services/identity/requirements.txt -r backend/services/gateway/requirements.txt
 
   python-syntax:
     name: Python syntax
@@ -60,26 +60,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Identity
+            requirements: backend/services/identity/requirements.txt
+            tests: tests/identity
+            pythonpath: ${{ github.workspace }}/backend/services/identity:${{ github.workspace }}
+          - name: Catalog and Integration
+            requirements: backend/services/catalog/requirements.txt
+            tests: tests/catalog tests/integration
+            pythonpath: ${{ github.workspace }}/backend/services/catalog:${{ github.workspace }}
           - name: Visualization
             requirements: backend/services/visualization/requirements.txt
             tests: backend/services/visualization/tests
             pythonpath: ${{ github.workspace }}
-          - name: SQL executor
+          - name: SQL executor and Adapters
             requirements: backend/services/sql_executor/requirements.txt
-            tests: backend/services/sql_executor/tests
+            tests: tests/sql_executor tests/adapters tests/security
             pythonpath: ${{ github.workspace }}/backend/services/sql_executor:${{ github.workspace }}
           - name: Semantic router
             requirements: backend/services/semantic_router/requirements.txt
-            tests: backend/services/semantic_router/tests
+            tests: tests/semantic_router
             pythonpath: ${{ github.workspace }}/backend/services/semantic_router:${{ github.workspace }}
           - name: SQL generator
             requirements: backend/services/sql_generator/requirements.txt
-            tests: backend/services/sql_generator/tests
+            tests: tests/sql_generator
             pythonpath: ${{ github.workspace }}/backend/services/sql_generator:${{ github.workspace }}
-          - name: Orchestrator dashboards and exports
+          - name: Gateway
+            requirements: backend/services/gateway/requirements.txt
+            tests: tests/gateway
+            pythonpath: ${{ github.workspace }}/backend/services/gateway:${{ github.workspace }}
+          - name: Orchestrator
             requirements: backend/services/orchestrator/requirements.txt
-            tests: tests/orchestrator
-            pythonpath: ${{ github.workspace }}
+            tests: tests/orchestrator tests/e2e/test_chinook_regression.py
+            pythonpath: ${{ github.workspace }}/backend/services/orchestrator:${{ github.workspace }}
             testing: "1"
     steps:
       - uses: actions/checkout@v4
@@ -95,6 +107,9 @@ jobs:
         env:
           PYTHONPATH: ${{ matrix.pythonpath }}
           TESTING: ${{ matrix.testing }}
+          JWT_SECRET: dev-secret-change-in-production
+          JWT_SECRET_KEY: dev-secret-change-in-production
+          FERNET_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
         run: python -m pytest --cov=backend/services --cov-report=xml -q ${{ matrix.tests }}
 
   compose:
@@ -104,7 +119,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate local composition
         run: |
-          printf 'FERNET_KEY=YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=\n' > .env
+          printf 'FERNET_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\nJWT_SECRET=dev-secret-change-in-production\n' > .env
           docker compose -f infra/compose/docker-compose.yml config -q
 
   e2e:
@@ -118,7 +133,7 @@ jobs:
           python-version: '3.12'
       - name: Prepare local-only runtime configuration
         run: |
-          printf 'FERNET_KEY=YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=\n' > .env
+          printf 'FERNET_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=\nJWT_SECRET=dev-secret-change-in-production\n' > .env
       - name: Start deterministic E2E stack
         run: docker compose -f tests/e2e/docker-compose.e2e.yml up -d --build --wait
       - name: Run black-box E2E tests

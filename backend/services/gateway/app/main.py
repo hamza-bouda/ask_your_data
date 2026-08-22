@@ -11,6 +11,7 @@ Responsibilities:
 from __future__ import annotations
 
 import json
+import uuid
 from typing import AsyncGenerator
 import httpx
 from fastapi import Request, Depends, HTTPException
@@ -25,12 +26,12 @@ from observability import inject_context
 
 try:
     from app.config import ORCHESTRATOR_URL, CORS_ALLOW_ORIGINS
-    from app.dependencies import get_tenant_context, require_admin
+    from app.dependencies import get_tenant_context, require_admin, require_analyst, require_viewer
     from app.rate_limit import init_redis, close_redis, check_rate_limit
     from app.middleware import CorrelationIdMiddleware
 except ImportError:
     from backend.services.gateway.app.config import ORCHESTRATOR_URL, CORS_ALLOW_ORIGINS
-    from backend.services.gateway.app.dependencies import get_tenant_context, require_admin
+    from backend.services.gateway.app.dependencies import get_tenant_context, require_admin, require_analyst, require_viewer
     from backend.services.gateway.app.rate_limit import init_redis, close_redis, check_rate_limit
     from backend.services.gateway.app.middleware import CorrelationIdMiddleware
 
@@ -45,9 +46,12 @@ setup_logging(service_name="gateway")
 setup_tracing(service_name="gateway", app=app)
 setup_metrics(app)
 
-app.add_middleware(CorrelationIdMiddleware)
-from app.middleware import SecurityHeadersMiddleware
+try:
+    from app.middleware import SecurityHeadersMiddleware, CorrelationIdMiddleware
+except ImportError:
+    from backend.services.gateway.app.middleware import SecurityHeadersMiddleware, CorrelationIdMiddleware
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 
 # Add CORS so frontend can call Gateway
 app.add_middleware(
@@ -272,7 +276,7 @@ async def create_conversation(
 ):
     """Create a new conversation."""
     await check_rate_limit(context.user_id, action="run", tenant_id=context.tenant_id)
-    correlation_id = request.state.correlation_id
+    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id") or str(uuid.uuid4())
     
     # Proxy to orchestrator
     try:
@@ -305,7 +309,7 @@ async def send_message(
 ):
     """Send a message in an existing conversation."""
     await check_rate_limit(context.user_id, action="run", tenant_id=context.tenant_id)
-    correlation_id = request.state.correlation_id
+    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id") or str(uuid.uuid4())
     
     try:
         async with httpx.AsyncClient() as client:
@@ -359,10 +363,7 @@ async def stream_run_events(
     context: TenantContext = Depends(require_viewer)
 ):
     """Stream events for a specific run using Server-Sent Events (SSE)."""
-    # Note: no rate limit check here because SSE is a single long-lived connection, 
-    # but could be added if needed to prevent opening too many streams.
-    
-    correlation_id = request.state.correlation_id
+    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get("x-correlation-id") or str(uuid.uuid4())
     
     return StreamingResponse(
         _orchestrator_event_stream(run_id, context.tenant_id, context.user_id, correlation_id),
@@ -801,3 +802,88 @@ async def export_results(message_id: str, format: str, request: Request, context
         )
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+
+@app.get("/api/v1/search")
+@app.get("/v1/search")
+async def global_search(
+    q: str = "",
+    limit: int = 10,
+    request: Request = None,
+    context: TenantContext = Depends(get_tenant_context)
+):
+    """Unified multi-entity global search across conversations, dashboards, and data sources."""
+    query = (q or "").strip().lower()
+    if not query:
+        return {"conversations": [], "dashboards": [], "data_sources": [], "total": 0}
+
+    from app.config import ORCHESTRATOR_URL, CATALOG_URL
+    results = {"conversations": [], "dashboards": [], "data_sources": [], "total": 0}
+    corr_id = getattr(request.state, "correlation_id", "") if request else ""
+
+    async with httpx.AsyncClient() as client:
+        # 1. Search conversations
+        try:
+            conv_resp = await client.get(
+                f"{ORCHESTRATOR_URL}/internal/conversations",
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id},
+                headers={"X-Correlation-ID": corr_id},
+                timeout=5.0
+            )
+            if conv_resp.status_code == 200:
+                convs = conv_resp.json()
+                matching_convs = [
+                    {"id": c["id"], "title": c.get("title") or "Nouvelle conversation", "type": "conversation", "url": f"/chat?conv={c['id']}"}
+                    for c in convs
+                    if query in (c.get("title") or "").lower()
+                ]
+                results["conversations"] = matching_convs[:limit]
+        except Exception:
+            pass
+
+        # 2. Search dashboards
+        try:
+            is_admin = str("admin" in context.roles or "manager" in context.roles).lower()
+            dash_resp = await client.get(
+                f"{ORCHESTRATOR_URL}/internal/dashboards",
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id, "is_admin": is_admin},
+                headers={"X-Correlation-ID": corr_id},
+                timeout=5.0
+            )
+            if dash_resp.status_code == 200:
+                dashboards = dash_resp.json()
+                matching_dash = [
+                    {"id": d["id"], "title": d.get("title") or "Tableau de bord", "description": d.get("description"), "type": "dashboard", "url": f"/dashboards/{d['id']}"}
+                    for d in dashboards
+                    if query in (d.get("title") or "").lower() or query in (d.get("description") or "").lower()
+                ]
+                results["dashboards"] = matching_dash[:limit]
+        except Exception:
+            pass
+
+        # 3. Search data sources
+        try:
+            sources_resp = await client.get(
+                f"{CATALOG_URL}/api/v1/catalog/sources",
+                headers={
+                    "x-tenant-id": context.tenant_id,
+                    "x-user-id": context.user_id,
+                    "X-Correlation-ID": corr_id
+                },
+                timeout=5.0
+            )
+            if sources_resp.status_code == 200:
+                sources = sources_resp.json()
+                if isinstance(sources, dict):
+                    sources = sources.get("sources", [])
+                matching_sources = [
+                    {"id": s["id"], "title": s.get("name") or f"Source {s['id']}", "dialect": s.get("dialect"), "type": "data_source", "url": f"/data-sources"}
+                    for s in sources
+                    if query in (s.get("name") or "").lower() or query in (s.get("dialect") or "").lower()
+                ]
+                results["data_sources"] = matching_sources[:limit]
+        except Exception:
+            pass
+
+    results["total"] = len(results["conversations"]) + len(results["dashboards"]) + len(results["data_sources"])
+    return results

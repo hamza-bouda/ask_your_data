@@ -11,9 +11,6 @@ scrape_configs:
   - job_name: 'catalog'
     static_configs:
       - targets: ['catalog:8002']
-  - job_name: 'query-execution'
-    static_configs:
-      - targets: ['query-execution:8003']
   - job_name: 'orchestrator'
     static_configs:
       - targets: ['orchestrator:8004']

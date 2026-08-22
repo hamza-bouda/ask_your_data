@@ -3,13 +3,14 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 if os.getenv("TESTING") == "1":
-    DATABASE_URL = "sqlite:///./test.db"
+    DATABASE_URL = os.getenv("ORCHESTRATOR_DATABASE_URL", "sqlite:///./orchestrator_test.db")
     engine = create_engine(
         DATABASE_URL, connect_args={"check_same_thread": False}
     )
 else:
     DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://askyourdata:askyourdata_dev@postgres:5432/askyourdata")
     engine = create_engine(DATABASE_URL)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -22,6 +23,13 @@ def get_db():
         db.close()
 
 def create_tables():
+    try:
+        from . import orm_models
+    except (ImportError, ValueError):
+        try:
+            from backend.services.orchestrator.app import orm_models
+        except ImportError:
+            import orm_models
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "postgresql":
         with engine.begin() as conn:

@@ -15,9 +15,12 @@ from sqlalchemy import String, Boolean, DateTime, JSON, ForeignKeyConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 try:
-    from app.database import Base
-except ImportError:
-    from backend.services.identity.app.database import Base
+    from .database import Base
+except (ImportError, ValueError):
+    try:
+        from backend.services.identity.app.database import Base
+    except ImportError:
+        from app.database import Base
 
 
 class TenantPolicy(Base):
@@ -88,5 +91,5 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(100), primary_key=True) # UUID or username
     tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
     username: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    password: Mapped[str] = mapped_column(String(100), nullable=False)
-
+    # Stores a versioned scrypt hash; legacy development rows are migrated on login.
+    password: Mapped[str] = mapped_column(String(200), nullable=False)

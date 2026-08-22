@@ -15,7 +15,7 @@ IS_PRODUCTION = APP_ENV in {"production", "prod"}
 # ── JWT Settings ─────────────────────────────────────────────────
 # In production, this would be the public key from your OIDC provider.
 # For dev, we use a shared secret (HS256 symmetric signing).
-JWT_SECRET: str = os.getenv("JWT_SECRET", "dev-secret-change-in-production")
+JWT_SECRET: str = os.getenv("JWT_SECRET") or os.getenv("JWT_SECRET_KEY") or "dev-secret-change-in-production"
 JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
 
 if IS_PRODUCTION and JWT_SECRET == "dev-secret-change-in-production":
@@ -34,7 +34,10 @@ DEV_ENDPOINTS_ENABLED = os.getenv(
 JWT_AUDIENCE: str = os.getenv("JWT_AUDIENCE", "ask-your-data")
 
 # ── Database ─────────────────────────────────────────────────────
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    "postgresql://askyourdata:askyourdata_dev@postgres:5432/askyourdata",
-)
+if os.getenv("TESTING") == "1":
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./test_identity.db")
+else:
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql://askyourdata:askyourdata_dev@postgres:5432/askyourdata",
+    )
