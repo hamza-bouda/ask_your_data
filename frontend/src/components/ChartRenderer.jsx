@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import {
   BarChart,
   Bar,
@@ -30,6 +30,9 @@ const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899'
 const ChartRenderer = ({ data, chartSpec }) => {
   const [viewMode, setViewMode] = useState('chart'); // 'chart' or 'table'
   const [selectedChartType, setSelectedChartType] = useState(null);
+  const chartId = useId().replace(/:/g, '');
+  const areaGradientId = `areaGrad-${chartId}`;
+  const barGradientId = `barGrad-${chartId}`;
 
   if (!data || data.length === 0) return null;
 
@@ -151,7 +154,7 @@ const ChartRenderer = ({ data, chartSpec }) => {
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 20, left: 10, bottom: 50 }}>
               <defs>
-                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={areaGradientId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.7} />
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.05} />
                 </linearGradient>
@@ -160,7 +163,7 @@ const ChartRenderer = ({ data, chartSpec }) => {
               <XAxis dataKey={x_field} stroke="#94a3b8" fontSize={11} angle={-25} textAnchor="end" interval="preserveStartEnd" />
               <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(v) => v.toLocaleString()} />
               <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#f8fafc' }} />
-              <Area type="monotone" dataKey={y_field} stroke="#3b82f6" fill="url(#areaGrad)" strokeWidth={3} />
+              <Area type="monotone" dataKey={y_field} stroke="#3b82f6" fill={`url(#${areaGradientId})`} strokeWidth={3} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -173,7 +176,7 @@ const ChartRenderer = ({ data, chartSpec }) => {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 10, right: 20, left: 10, bottom: 50 }}>
               <defs>
-                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={barGradientId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#3b82f6" stopOpacity={1} />
                   <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.8} />
                 </linearGradient>
@@ -186,7 +189,7 @@ const ChartRenderer = ({ data, chartSpec }) => {
                 formatter={(value) => Number(value).toLocaleString()}
                 cursor={{ fill: 'rgba(255,255,255,0.04)' }}
               />
-              <Bar dataKey={y_field} fill="url(#barGrad)" radius={[6, 6, 0, 0]} animationDuration={800} />
+              <Bar dataKey={y_field} fill={`url(#${barGradientId})`} radius={[6, 6, 0, 0]} animationDuration={800} />
             </BarChart>
           </ResponsiveContainer>
         </div>
