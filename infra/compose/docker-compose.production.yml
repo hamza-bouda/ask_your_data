@@ -23,8 +23,7 @@ services:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?set CORS_ALLOW_ORIGINS}
       ALLOW_SSE_TOKEN_QUERY: "false"
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    ports:
-      - "${GATEWAY_PORT:-8000}:8000"
+    ports: !reset []
 
   identity:
     environment:
