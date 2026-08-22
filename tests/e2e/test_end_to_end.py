@@ -75,3 +75,35 @@ def test_full_catalog_conversation_sse(api_client, auth_headers, governed_source
     run = response.json()
     assert run["status"] == "completed"
     assert allowed_table in run["response"]
+
+
+def test_full_sql_conversation_sse_in_mock_mode(api_client, auth_headers, governed_source):
+    source_id, allowed_table = governed_source
+    headers = {**auth_headers, "X-Source-Id": source_id}
+    response = api_client.post("/v1/conversations", headers=headers, json={"title": "E2E SQL"})
+    assert response.status_code == 200, response.text
+    conversation_id = response.json()["id"]
+    response = api_client.post(
+        f"/v1/conversations/{conversation_id}/messages",
+        headers=headers,
+        json={"message": f"Combien de lignes contient la table {allowed_table} ?"},
+    )
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run_id"]
+
+    terminal_event = None
+    with api_client.stream("GET", f"/v1/runs/{run_id}/events", headers=headers, timeout=60.0) as stream:
+        for line in stream.iter_lines():
+            if not line.startswith("data:"):
+                continue
+            event = json.loads(line.split(":", 1)[1].strip())
+            if event.get("event_type") in {"result_ready", "run_failed"}:
+                terminal_event = event
+                break
+    assert terminal_event and terminal_event["event_type"] == "result_ready", terminal_event
+    response = api_client.get(f"/v1/runs/{run_id}", headers=headers)
+    assert response.status_code == 200
+    run = response.json()
+    assert run["status"] == "completed"
+    assert run["results"] and "row_count" in run["results"][0]
+    assert run["chart_spec"]["chart_type"] == "metric"

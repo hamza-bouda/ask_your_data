@@ -1,7 +1,8 @@
 import pytest
 from app.router import create_semantic_plan
 
-def test_semantic_plan_data_query():
+def test_semantic_plan_data_query(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
     query = "Quel est le chiffre d'affaires total par client en 2023 ?"
     context = {
         "tables": ["sales", "customers"],
@@ -16,7 +17,8 @@ def test_semantic_plan_data_query():
     assert plan["metric"] is not None
     assert plan["confidence"] > 0.5
 
-def test_semantic_plan_ambiguous():
+def test_semantic_plan_ambiguous(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
     query = "Montre-moi les données"
     context = {
         "tables": ["sales", "customers", "products"]
@@ -28,7 +30,8 @@ def test_semantic_plan_ambiguous():
     assert plan["intent"] == "AMBIGUOUS"
     assert len(plan["clarification_options"]) > 0
 
-def test_semantic_plan_unrelated():
+def test_semantic_plan_unrelated(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
     query = "Bonjour, comment ça va ?"
     context = {}
     chat_history = []

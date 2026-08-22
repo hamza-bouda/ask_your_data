@@ -51,6 +51,14 @@ jobs:
             requirements: backend/services/sql_executor/requirements.txt
             tests: backend/services/sql_executor/tests
             pythonpath: ${{ github.workspace }}/backend/services/sql_executor:${{ github.workspace }}
+          - name: Semantic router
+            requirements: backend/services/semantic_router/requirements.txt
+            tests: backend/services/semantic_router/tests
+            pythonpath: ${{ github.workspace }}/backend/services/semantic_router:${{ github.workspace }}
+          - name: SQL generator
+            requirements: backend/services/sql_generator/requirements.txt
+            tests: backend/services/sql_generator/tests
+            pythonpath: ${{ github.workspace }}/backend/services/sql_generator:${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
