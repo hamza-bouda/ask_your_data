@@ -57,6 +57,8 @@ def _is_date_or_time(val: Any) -> bool:
 def _requested_chart_type(question: str | None) -> ChartType | None:
     """Honor an explicit user choice when it is compatible with the result set."""
     normalized = (question or "").lower()
+    if any(term in normalized for term in ("sous forme de tableau", "affiche le tableau", "vue tableau", "as a table", "table view")):
+        return ChartType.TABLE
     if any(term in normalized for term in ("camembert", "pie chart", "pie chart", "secteur")):
         return ChartType.PIE
     if any(term in normalized for term in ("donut", "doughnut", "anneau")):
@@ -91,6 +93,13 @@ async def generate_chart_spec(request: ChartSpecRequest):
 
     keys = list(data[0].keys())
     requested_type = _requested_chart_type(request.question)
+
+    if requested_type == ChartType.TABLE:
+        return ChartSpec(
+            chart_type=ChartType.TABLE,
+            title="Tableau de résultats",
+            reason="L'utilisateur a demandé explicitement un affichage tabulaire.",
+        )
     
     # 1. Single row, single numeric value -> Metric
     if len(data) == 1 and len(keys) == 1 and _is_numeric(data[0][keys[0]]):
