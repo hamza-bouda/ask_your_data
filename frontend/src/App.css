@@ -32,6 +32,9 @@
   z-index: 10;
 }
 
+.mobile-nav-toggle,
+.mobile-nav-backdrop { display: none; }
+
 .sidebar-header {
   height: 64px;
   display: flex;
@@ -1190,7 +1193,34 @@ code {
 @media (max-width: 768px) {
   .app-sidebar {
     position: fixed;
+    top: 0;
+    bottom: 0;
     transform: translateX(-100%);
+    transition: transform .2s ease;
+    box-shadow: 18px 0 40px rgba(0, 0, 0, .35);
+    z-index: 30;
+  }
+  .app-sidebar.open { transform: translateX(0); }
+  .mobile-nav-toggle {
+    position: fixed;
+    z-index: 31;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    top: 11px;
+    left: 12px;
+    color: var(--text-main);
+    background: rgba(15, 23, 42, .95);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+  }
+  .mobile-nav-backdrop {
+    position: fixed;
+    z-index: 29;
+    display: block;
+    inset: 0;
+    background: rgba(2, 6, 23, .56);
   }
   .profile-layout, .explorer-layout {
     flex-direction: column;
