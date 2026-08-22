@@ -216,6 +216,13 @@ def add_dashboard_item(
     if not msg or msg.conversation.tenant_id != tenant_id:
         raise HTTPException(status_code=400, detail="Invalid source message")
 
+    duplicate = db.query(DashboardItem).filter(
+        DashboardItem.dashboard_id == dashboard.id,
+        DashboardItem.source_message_id == body.source_message_id,
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="This result is already saved in the dashboard")
+
     item = DashboardItem(
         dashboard_id=dashboard.id,
         source_message_id=body.source_message_id,

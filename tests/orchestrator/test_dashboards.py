@@ -69,3 +69,9 @@ def test_add_item_to_dashboard():
     assert len(items) == 1
     assert items[0]["title"] == "My Item"
     assert items[0]["results"] == [{"a": 1}]
+
+    duplicate = client.post(
+        f"/internal/dashboards/{dash_id}/items?tenant_id=t1&user_id=u1",
+        json={"source_message_id": msg.id, "title": "My Item", "order": 0},
+    )
+    assert duplicate.status_code == 409
