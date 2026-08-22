@@ -13,7 +13,9 @@ export default function ConversationsPage() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [debugData, setDebugData] = useState(null);
-  const [showDebug, setShowDebug] = useState(true);
+  // The semantic plan and SQL are useful for investigation, but should not
+  // overwhelm a normal analyst's conversation by default.
+  const [showDebug, setShowDebug] = useState(false);
   const [runStage, setRunStage] = useState(null);
   const [savingMessage, setSavingMessage] = useState(null);
   
