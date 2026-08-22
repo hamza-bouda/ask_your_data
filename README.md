@@ -162,6 +162,6 @@ ask_your_data/
 
 ---
 
-## License and Compliance
+## Compliance
 
-Licensed under the MIT License. Designed strictly for read-only analytical database access without data mutation privileges.
+Designed strictly for read-only analytical database access without data mutation privileges. No open-source license is currently granted; reuse and redistribution require the author's permission.
