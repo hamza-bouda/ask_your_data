@@ -84,3 +84,20 @@ def test_visualization_fallback_table_no_chart_pattern():
     assert response.status_code == 200
     data = response.json()
     assert data["chart_type"] == "table"
+
+
+@pytest.mark.parametrize(
+    ("question", "results", "expected"),
+    [
+        ("montre un graphique en aire", [{"date": "2024-01-01", "value": 2}, {"date": "2024-01-02", "value": 4}], "area"),
+        ("barres horizontales", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "horizontal_bar"),
+        ("un donut", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "donut"),
+        ("un radar", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "radar"),
+        ("un nuage de points", [{"x": 2, "y": 4}, {"x": 3, "y": 8}], "scatter"),
+        ("affiche le tableau", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "table"),
+    ],
+)
+def test_visualization_honors_explicit_supported_type(question, results, expected):
+    response = client.post("/internal/chart-spec", json={"results": results, "question": question})
+    assert response.status_code == 200
+    assert response.json()["chart_type"] == expected
