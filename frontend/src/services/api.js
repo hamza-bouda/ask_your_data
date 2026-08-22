@@ -14,7 +14,7 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
   const sourceId = localStorage.getItem('activeSourceId');
-  if (sourceId) {
+  if (sourceId && !config.headers['X-Source-Id']) {
     config.headers['X-Source-Id'] = sourceId;
   }
   return config;
@@ -46,8 +46,10 @@ export const getConversations = async () => {
   return response.data;
 };
 
-export const createConversation = async (title = null) => {
-  const response = await api.post('/v1/conversations', { title });
+export const createConversation = async (title = null, sourceId = null) => {
+  const headers = {};
+  if (sourceId) headers['X-Source-Id'] = sourceId;
+  const response = await api.post('/v1/conversations', { title }, { headers });
   return response.data;
 };
 
@@ -118,9 +120,11 @@ export const streamRunEvents = async (runId, onEvent, signal) => {
   }
 };
 
-export const sendMessage = async (conversationId, message) => {
+export const sendMessage = async (conversationId, message, sourceId = null) => {
   try {
-    const response = await api.post(`/v1/conversations/${conversationId}/messages`, { message });
+    const headers = {};
+    if (sourceId) headers['X-Source-Id'] = sourceId;
+    const response = await api.post(`/v1/conversations/${conversationId}/messages`, { message }, { headers });
     return response.data;
   } catch (error) {
     console.error('Error sending message:', error);

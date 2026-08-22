@@ -66,10 +66,19 @@ def plan_node(state: ConversationState) -> dict:
                 }
         
             if intent == "UNRELATED":
+                context_data = state.context or {}
+                tables_info = context_data.get("tables", [])
+                example = "« liste les tables disponibles »"
+                if tables_info:
+                    first_table = tables_info[0]
+                    table_name = first_table if isinstance(first_table, str) else first_table.get("name")
+                    if table_name:
+                         example = f"« montre-moi les données de {table_name} »"
+
                 return {
                     "status": "unrelated",
                     "semantic_plan": data,
-                    "results": [{"response": "Je peux vous aider à explorer les données autorisées, créer une analyse ou un graphique. Par exemple : « liste les tables disponibles »."}]
+                    "results": [{"response": f"Je peux vous aider à explorer les données autorisées, créer une analyse ou un graphique. Par exemple : {example}."}]
                 }
 
             if intent == "CATALOG_QUERY":

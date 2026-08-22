@@ -2,9 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare, Save } from 'lucide-react';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
-import DebugPanel from '../components/DebugPanel';
 import SaveToDashboardDialog from '../components/SaveToDashboardDialog';
-import { getConversations, createConversation, getConversation, getRun, sendMessage, setActiveSourceId, streamRunEvents, waitForRun } from '../services/api';
+import { getConversations, createConversation, getConversation, getRun, sendMessage, setActiveSourceId, streamRunEvents, waitForRun, getDataSources, getActiveSourceId } from '../services/api';
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState([]);
@@ -12,10 +11,8 @@ export default function ConversationsPage() {
   const [conversationId, setConversationId] = useState(null);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [debugData, setDebugData] = useState(null);
-  // The semantic plan and SQL are useful for investigation, but should not
-  // overwhelm a normal analyst's conversation by default.
-  const [showDebug, setShowDebug] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [sources, setSources] = useState([]);
   const [runStage, setRunStage] = useState(null);
   const [savingMessage, setSavingMessage] = useState(null);
   
@@ -48,18 +45,6 @@ export default function ConversationsPage() {
         formattedMessages.push({ role: 'assistant', content: "Bonjour ! Je suis AskYourData. Posez-moi une question sur vos données." });
       }
       setMessages(formattedMessages);
-      
-      // Update debug panel
-      const lastAssistantMsg = formattedMessages.filter(m => m.role === 'assistant').pop();
-      if (lastAssistantMsg && lastAssistantMsg.payload) {
-        setDebugData({
-          plan: lastAssistantMsg.payload.semantic_plan,
-          sql: lastAssistantMsg.payload.sql_query,
-          error: lastAssistantMsg.payload.error_message
-        });
-      } else {
-        setDebugData(null);
-      }
     } catch (error) {
       console.error("Error loading conversation", error);
     }
@@ -67,18 +52,25 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     const initPage = async () => {
+      setIsLoadingHistory(true);
       try {
+        const loadedSources = await getDataSources();
+        setSources(loadedSources);
         const convs = await getConversations();
         setConversations(convs);
         if (convs.length > 0) {
           setConversationId(convs[0].id);
-          if (convs[0].source_id) setActiveSourceId(convs[0].source_id);
+          if (convs[0].source_id) {
+             setActiveSourceId(convs[0].source_id);
+          }
           await loadConversationMessages(convs[0].id);
         } else {
           setMessages([{ role: 'assistant', content: "Bonjour ! Je suis AskYourData. Posez-moi une question sur vos données (ex: 'Combien y a-t-il d'utilisateurs ?')." }]);
         }
       } catch (error) {
         console.error("Failed to load conversations", error);
+      } finally {
+        setIsLoadingHistory(false);
       }
     };
     initPage();
@@ -94,13 +86,13 @@ export default function ConversationsPage() {
 
   const handleNewConversation = async () => {
     try {
-      const conv = await createConversation();
-      setConversations((current) => [{ id: conv.id, title: conv.title || "Nouvelle conversation" }, ...current]);
+      const activeSource = getActiveSourceId();
+      const conv = await createConversation("Nouvelle conversation", activeSource);
+      setConversations((current) => [{ id: conv.id, title: conv.title || "Nouvelle conversation", source_id: activeSource }, ...current]);
       setConversationId(conv.id);
       setMessages([
         { role: 'assistant', content: "Nouvelle conversation démarrée ! Que voulez-vous savoir ?" }
       ]);
-      setDebugData(null);
     } catch (error) {
       console.error("Error creating conversation", error);
     }
@@ -118,15 +110,20 @@ export default function ConversationsPage() {
     try {
       let currentConvId = conversationId;
       const currentConversation = conversations.find((conversation) => conversation.id === currentConvId);
-      if (currentConversation?.source_id) setActiveSourceId(currentConversation.source_id);
+      let sourceId = currentConversation?.source_id || getActiveSourceId();
+      
+      if (currentConversation?.source_id) {
+         setActiveSourceId(currentConversation.source_id);
+      }
+      
       if (!currentConvId) {
-        const newConv = await createConversation();
+        const newConv = await createConversation("Nouvelle conversation", sourceId);
         currentConvId = newConv.id;
         setConversationId(currentConvId);
-        setConversations((current) => [{ id: newConv.id, title: newConv.title || "Nouvelle conversation" }, ...current]);
+        setConversations((current) => [{ id: newConv.id, title: newConv.title || "Nouvelle conversation", source_id: sourceId }, ...current]);
       }
 
-      const queuedRun = await sendMessage(currentConvId, userMessage);
+      const queuedRun = await sendMessage(currentConvId, userMessage, sourceId);
       setRunStage('En attente du traitement…');
       try {
         await streamRunEvents(queuedRun.run_id, (event) => {
@@ -170,13 +167,6 @@ export default function ConversationsPage() {
       };
 
       setMessages(prev => [...prev, aiMessage]);
-
-      setDebugData({
-        plan: payload.semantic_plan,
-        sql: payload.sql_query,
-        error: payload.error_message || null
-      });
-
       const convs = await getConversations();
       setConversations(convs);
 
@@ -195,6 +185,11 @@ export default function ConversationsPage() {
   const handleClarificationClick = (optionText) => {
     handleSend(null, optionText);
   };
+
+  const currentSourceId = conversations.find(c => c.id === conversationId)?.source_id || getActiveSourceId();
+  const activeSourceInfo = sources.find(s => s.id === currentSourceId);
+  const isSourceArchived = activeSourceInfo?.status === 'archived';
+  const hasNoSources = sources.length === 0;
 
   return (
     <div className="conversations-layout">
@@ -229,19 +224,16 @@ export default function ConversationsPage() {
       {/* Main Chat Area */}
       <div className="chat-section">
         <div className="chat-header">
-          <h2>Conversation en cours</h2>
+          <h2>Conversation en cours {activeSourceInfo ? `(Source: ${activeSourceInfo.name})` : ''}</h2>
           <div style={{ flex: 1 }} />
-          <button 
-            className="icon-btn"
-            onClick={() => setShowDebug(!showDebug)} 
-            title={showDebug ? "Masquer le panneau debug" : "Afficher le panneau debug"}
-          >
-            {showDebug ? <PanelRightClose size={20} /> : <PanelRightOpen size={20} />}
-          </button>
         </div>
 
         <div className="chat-history">
-          {messages.map((msg, idx) => (
+          {isLoadingHistory ? (
+             <div className="typing-indicator" style={{ alignSelf: 'center', margin: '2rem 0' }}>
+               <span>Chargement de l'historique...</span>
+             </div>
+          ) : messages.map((msg, idx) => (
             <div key={idx}>
               <MessageBubble role={msg.role === 'assistant' ? 'ai' : msg.role} content={msg.content} />
               
@@ -254,6 +246,22 @@ export default function ConversationsPage() {
                     chartSpec={msg.payload.chart_spec}
                   />
                 </div>
+              )}
+              
+              {msg.payload?.semantic_plan && (
+                <details className="technical-details" style={{ margin: '0.5rem 0 0 3.5rem', fontSize: '0.85rem', color: '#64748b' }}>
+                  <summary style={{ cursor: 'pointer', marginBottom: '0.5rem' }}>Détails techniques</summary>
+                  <div style={{ backgroundColor: '#f8fafc', padding: '0.75rem', borderRadius: '6px', overflowX: 'auto', border: '1px solid #e2e8f0' }}>
+                    <strong>Plan Sémantique:</strong>
+                    <pre style={{ margin: '0.25rem 0 1rem 0' }}>{JSON.stringify(msg.payload.semantic_plan, null, 2)}</pre>
+                    {msg.payload.sql_query && (
+                      <>
+                        <strong>Requête SQL:</strong>
+                        <pre style={{ margin: '0.25rem 0 0 0' }}>{msg.payload.sql_query}</pre>
+                      </>
+                    )}
+                  </div>
+                </details>
               )}
               
               {msg.payload?.clarification_options && (
@@ -284,34 +292,36 @@ export default function ConversationsPage() {
         </div>
 
         <div className="input-area">
-          <form className="input-container" onSubmit={handleSend}>
-            <input 
-              type="text" 
-              className="chat-input"
-              placeholder="Posez votre question sur vos données..." 
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              disabled={isLoading}
-            />
-            <button 
-              type="submit" 
-              className="send-button"
-              disabled={!inputValue.trim() || isLoading}
-            >
-              <Send size={18} />
-            </button>
-          </form>
+          {hasNoSources ? (
+            <div className="error-message" style={{ margin: '1rem', textAlign: 'center' }}>
+               Aucune source de données n'est configurée. Allez dans "Sources de données" pour en ajouter une.
+            </div>
+          ) : isSourceArchived ? (
+            <div className="error-message" style={{ margin: '1rem', textAlign: 'center' }}>
+               Cette conversation est liée à une source archivée. Vous ne pouvez plus y envoyer de requêtes.
+            </div>
+          ) : (
+            <form className="input-container" onSubmit={handleSend}>
+              <input 
+                type="text" 
+                className="chat-input"
+                placeholder="Posez votre question sur vos données..." 
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                disabled={isLoading}
+              />
+              <button 
+                type="submit" 
+                className="send-button"
+                disabled={!inputValue.trim() || isLoading}
+              >
+                <Send size={18} />
+              </button>
+            </form>
+          )}
         </div>
       </div>
 
-      {/* Right Sidebar: Debug/Context */}
-      {showDebug && debugData && (
-        <DebugPanel 
-          plan={debugData.plan} 
-          sql={debugData.sql} 
-          error={debugData.error} 
-        />
-      )}
       {savingMessage && <SaveToDashboardDialog messageId={savingMessage.id} title={savingMessage.title} onClose={() => setSavingMessage(null)} />}
     </div>
   );

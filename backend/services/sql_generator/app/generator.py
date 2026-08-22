@@ -45,7 +45,7 @@ def _mock_sql_draft(semantic_plan: dict[str, Any], schema: dict[str, Any]) -> Sq
         explanation="Deterministic offline count for the end-to-end workflow.",
     )
 
-def generate_sql(query: str, semantic_plan: dict[str, Any], schema: dict[str, Any]) -> SqlDraft:
+def generate_sql(query: str, semantic_plan: dict[str, Any], schema: dict[str, Any], chat_history: list[dict[str, Any]] = None) -> SqlDraft:
     """Generate a SQL query based on natural language and a database schema."""
     if os.getenv("LLM_PROVIDER", "").lower() == "mock":
         return _mock_sql_draft(semantic_plan, schema)
@@ -60,6 +60,7 @@ def generate_sql(query: str, semantic_plan: dict[str, Any], schema: dict[str, An
         result = chain.invoke({
             "schema_context": schema_str,
             "semantic_plan": str(semantic_plan),
+            "history": str(chat_history or []),
             "question": query
         })
         return result

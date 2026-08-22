@@ -58,7 +58,9 @@ def test_generate_sql_endpoint(mock_get_llm):
     
     response = client.post("/internal/generate-sql", json={
         "query": "Combien y a-t-il d'utilisateurs ?",
-        "schema_definition": MOCK_SCHEMA
+        "semantic_plan": {},
+        "schema_definition": MOCK_SCHEMA,
+        "chat_history": []
     })
     
     assert response.status_code == 200
@@ -101,6 +103,7 @@ def test_generate_sql_empty_query():
     """An empty query should be rejected."""
     response = client.post("/internal/generate-sql", json={
         "query": "   ",
+        "semantic_plan": {},
         "schema_definition": MOCK_SCHEMA
     })
     assert response.status_code == 400
@@ -109,6 +112,7 @@ def test_generate_sql_empty_schema():
     """An empty schema should be rejected."""
     response = client.post("/internal/generate-sql", json={
         "query": "Combien d'utilisateurs ?",
+        "semantic_plan": {},
         "schema_definition": {}
     })
     assert response.status_code == 400

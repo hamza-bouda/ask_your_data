@@ -98,7 +98,9 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
         "sqlite": "sqlite",
     }.get(dialect)
     if not sqlglot_dialect:
-        raise SqlExecutionError(f"Unsupported SQL dialect: {dialect}")
+        raise SqlExecutionError(f"Dialecte SQL non supporté : {dialect}")
+    
+    # 1. Regex fallback defense
     
     # 1. Regex fallback defense
     forbidden_keywords = [
@@ -109,38 +111,38 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
     upper_query = sql_query.upper()
     for keyword in forbidden_keywords:
         if re.search(keyword, upper_query):
-            raise SqlExecutionError("Forbidden keyword detected by regex fallback. Query must be READ ONLY.")
+            raise SqlExecutionError("Mot-clé interdit détecté. La requête doit être en LECTURE SEULE.")
 
     # 2. Parse AST
     try:
         parsed = sqlglot.parse(sql_query, read=sqlglot_dialect)
     except Exception as e:
-        raise SqlExecutionError(f"Failed to parse SQL: {e}")
+        raise SqlExecutionError(f"Impossible d'analyser la requête SQL : {e}")
         
     if not parsed or len(parsed) > 1:
-        raise SqlExecutionError("Only a single SQL statement is allowed.")
+        raise SqlExecutionError("Une seule instruction SQL est autorisée par requête.")
         
     ast = parsed[0]
     
     # 3. Restrict AST type to SELECT or WITH ... SELECT
     if not isinstance(ast, exp.Select):
-        raise SqlExecutionError("Only SELECT queries are allowed.")
+        raise SqlExecutionError("Seules les requêtes SELECT sont autorisées.")
         
     # Check for forbidden AST nodes anywhere in the tree
     forbidden_types = (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter, exp.Command)
     for forbidden_type in forbidden_types:
         if list(ast.find_all(forbidden_type)):
-            raise SqlExecutionError("Forbidden operation detected in AST.")
+            raise SqlExecutionError("Opération interdite détectée (modification de données).")
 
     # 4. Check Policy Allowlist
     allowed_schema = get_allowed_schema(tenant_id) if source_id is None else get_allowed_schema(tenant_id, source_id)
     if not allowed_schema:
-        raise SqlExecutionError("No database or tables are allowed by policy for this tenant.")
+        raise SqlExecutionError("Aucune donnée n'est autorisée par la politique d'accès pour cette source (Deny-All).")
         
     for table_node in ast.find_all(exp.Table):
         t_name = table_node.name.lower()
         if t_name not in allowed_schema:
-            raise SqlExecutionError(f"Access to table '{table_node.name}' is denied by policy.")
+            raise SqlExecutionError(f"L'accès à la table '{table_node.name}' est refusé par la politique de sécurité.")
 
     # Resolve aliases before checking every selected/referenced column.  Table-level
     # approval alone is insufficient: a user can be allowed to see a table while a
@@ -167,14 +169,14 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
         qualifier = (column_node.table or "").lower()
         if column_name == "*":
             raise SqlExecutionError(
-                "SELECT * is not allowed. Select explicit columns allowed by policy."
+                "L'utilisation de 'SELECT *' est interdite. Veuillez sélectionner explicitement les colonnes autorisées."
             )
 
         if qualifier:
             table_name = aliases.get(qualifier, qualifier)
             if table_name not in allowed_schema or column_name not in allowed_schema[table_name]:
                 raise SqlExecutionError(
-                    f"Access to column '{column_node.name}' is denied by policy."
+                    f"L'accès à la colonne '{column_node.name}' est refusé par la politique de sécurité."
                 )
             continue
 
@@ -188,7 +190,7 @@ def validate_and_prepare_sql(sql_query: str, tenant_id: str, dialect: str = "pos
         ]
         if len(matching_tables) != 1:
             raise SqlExecutionError(
-                f"Column '{column_node.name}' is not uniquely allowed by policy. Qualify it with an allowed table."
+                f"La colonne '{column_node.name}' est ambiguë ou non explicitement autorisée. Veuillez la préfixer avec le nom de la table."
             )
             
     # 5. Inject LIMIT if missing or too large
@@ -220,7 +222,7 @@ def execute_query(sql_query: str, tenant_id: str, source_id: str | None = None) 
     try:
         db = get_tenant_session(tenant_id, source_id)
     except Exception as exc:
-        raise SqlExecutionError(f"Database Connection Error: {str(exc)}")
+        raise SqlExecutionError(f"Erreur de connexion à la base de données : {str(exc)}")
         
     dialect_name = db.bind.dialect.name
     
@@ -230,8 +232,8 @@ def execute_query(sql_query: str, tenant_id: str, source_id: str | None = None) 
         log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", exc.message, source_id)
         raise
     except Exception as exc:
-        log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", "Internal Validation Error", source_id)
-        raise SqlExecutionError("Internal Validation Error")
+        log_audit(tenant_id, sql_query, "DENY", 0, 0, "ERROR", "Erreur interne de validation.", source_id)
+        raise SqlExecutionError("Erreur interne de validation.")
     
     try:
         if dialect_name == "postgresql":
@@ -252,13 +254,13 @@ def execute_query(sql_query: str, tenant_id: str, source_id: str | None = None) 
     except SQLAlchemyError as exc:
         db.rollback()
         duration_ms = int((time.time() - start_time) * 1000)
-        error_msg = f"Database error: {str(exc.orig) if hasattr(exc, 'orig') else str(exc)}"
+        error_msg = f"Erreur de base de données : {str(exc.orig) if hasattr(exc, 'orig') else str(exc)}"
         log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", error_msg, source_id)
-        raise SqlExecutionError("Database error during execution.")
+        raise SqlExecutionError("Erreur de base de données lors de l'exécution.")
     except Exception as exc:
         db.rollback()
         duration_ms = int((time.time() - start_time) * 1000)
-        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", "Internal execution error", source_id)
-        raise SqlExecutionError("Internal execution error.")
+        log_audit(tenant_id, safe_sql, "ALLOW", duration_ms, 0, "ERROR", "Erreur interne d'exécution.", source_id)
+        raise SqlExecutionError("Erreur interne d'exécution.")
     finally:
         db.close()

@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from backend.services.semantic_router.app.main import app
-from backend.services.semantic_router.app.router import RouteResult, Intent
+from backend.services.semantic_router.app.router import SemanticPlanOut, Intent
 
 client = TestClient(app)
 
@@ -17,13 +17,16 @@ def test_route_data_query(mock_get_llm):
     mock_get_llm.return_value = mock_llm
     mock_llm.with_structured_output.return_value = mock_structured
     
-    mock_structured.invoke.return_value = RouteResult(
+    mock_structured.invoke.return_value = SemanticPlanOut(
         intent=Intent.DATA_QUERY,
         confidence=0.9,
-        clarification_options=[]
+        clarification_options=[],
+        source_tables=[],
+        dimensions=[],
+        filters=[]
     )
     
-    response = client.post("/internal/route", json={"query": "Combien d'utilisateurs ?"})
+    response = client.post("/internal/plan", json={"query": "Combien d'utilisateurs ?", "chat_history": []})
     assert response.status_code == 200
     data = response.json()
     assert data["intent"] == "DATA_QUERY"
@@ -36,13 +39,16 @@ def test_route_ambiguous_query(mock_get_llm):
     mock_get_llm.return_value = mock_llm
     mock_llm.with_structured_output.return_value = mock_structured
     
-    mock_structured.invoke.return_value = RouteResult(
+    mock_structured.invoke.return_value = SemanticPlanOut(
         intent=Intent.AMBIGUOUS,
         confidence=0.8,
-        clarification_options=["Option A", "Option B"]
+        clarification_options=["Option A", "Option B"],
+        source_tables=[],
+        dimensions=[],
+        filters=[]
     )
     
-    response = client.post("/internal/route", json={"query": "Le CA total"})
+    response = client.post("/internal/plan", json={"query": "Le CA total", "chat_history": []})
     assert response.status_code == 200
     data = response.json()
     assert data["intent"] == "AMBIGUOUS"
@@ -50,7 +56,7 @@ def test_route_ambiguous_query(mock_get_llm):
 
 def test_route_empty_query():
     """An empty query should be rejected."""
-    response = client.post("/internal/route", json={"query": "   "})
+    response = client.post("/internal/plan", json={"query": "   ", "chat_history": []})
     assert response.status_code == 400
 
 

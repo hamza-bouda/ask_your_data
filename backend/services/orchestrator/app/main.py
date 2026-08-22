@@ -172,6 +172,7 @@ async def get_conversation(conversation_id: str, tenant_id: str, user_id: str, d
 async def list_results(
     tenant_id: str,
     user_id: str,
+    source_id: Optional[str] = None,
     offset: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -179,14 +180,15 @@ async def list_results(
     """Return persisted data results without the client performing N+1 reads."""
     offset = max(offset, 0)
     limit = min(max(limit, 1), 100)
-    rows = (
+    query = (
         db.query(Message, Conversation.title)
         .join(Conversation, Message.conversation_id == Conversation.id)
         .filter(Conversation.tenant_id == tenant_id, Conversation.user_id == user_id)
-        .filter(Message.role.in_(["assistant", "ai"]))
-        .order_by(Message.created_at.desc())
-        .all()
     )
+    if source_id:
+        query = query.filter(Conversation.source_id == source_id)
+        
+    rows = query.filter(Message.role.in_(["assistant", "ai"])).order_by(Message.created_at.desc()).all()
     results = []
     for message, conversation_title in rows:
         payload = message.payload or {}

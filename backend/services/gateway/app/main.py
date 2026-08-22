@@ -407,7 +407,7 @@ async def list_results(
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{ORCHESTRATOR_URL}/internal/results",
-                params={"tenant_id": context.tenant_id, "user_id": context.user_id, "offset": offset, "limit": limit},
+                params={"tenant_id": context.tenant_id, "user_id": context.user_id, "source_id": request.headers.get("x-source-id") or None, "offset": offset, "limit": limit},
                 headers={"X-Correlation-ID": request.state.correlation_id},
                 timeout=15.0,
             )
@@ -581,7 +581,7 @@ async def create_dashboard(request: Request, context: TenantContext = Depends(ge
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f'{ORCHESTRATOR_URL}/internal/dashboards',
-                params={'tenant_id': context.tenant_id, 'user_id': context.user_id},
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'source_id': request.headers.get("x-source-id") or None},
                 json=body,
                 headers={'X-Correlation-ID': request.state.correlation_id},
                 timeout=10.0
@@ -598,7 +598,7 @@ async def get_dashboards(request: Request, context: TenantContext = Depends(get_
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f'{ORCHESTRATOR_URL}/internal/dashboards',
-                params={'tenant_id': context.tenant_id, 'user_id': context.user_id},
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'source_id': request.headers.get("x-source-id") or None},
                 headers={'X-Correlation-ID': request.state.correlation_id},
                 timeout=10.0
             )
@@ -615,7 +615,7 @@ async def get_dashboard(dashboard_id: str, request: Request, context: TenantCont
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}',
-                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin, 'source_id': request.headers.get("x-source-id") or None},
                 headers={'X-Correlation-ID': request.state.correlation_id},
                 timeout=10.0
             )
@@ -633,7 +633,7 @@ async def update_dashboard(dashboard_id: str, request: Request, context: TenantC
         async with httpx.AsyncClient() as client:
             resp = await client.patch(
                 f'{ORCHESTRATOR_URL}/internal/dashboards/{dashboard_id}',
-                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin},
+                params={'tenant_id': context.tenant_id, 'user_id': context.user_id, 'is_admin': is_admin, 'source_id': request.headers.get("x-source-id") or None},
                 json=body,
                 headers={'X-Correlation-ID': request.state.correlation_id},
                 timeout=10.0
@@ -706,7 +706,7 @@ async def export_results(message_id: str, format: str, request: Request, context
         req = client.build_request(
             "GET",
             f'{ORCHESTRATOR_URL}/internal/results/{message_id}/export',
-            params={'format': format, 'tenant_id': context.tenant_id, 'user_id': context.user_id},
+            params={'format': format, 'tenant_id': context.tenant_id, 'user_id': context.user_id, 'source_id': request.headers.get("x-source-id") or None},
             headers={'X-Correlation-ID': request.state.correlation_id}
         )
         resp = await client.send(req, stream=True)

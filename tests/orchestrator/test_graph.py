@@ -9,8 +9,28 @@ from backend.services.orchestrator.app.models import ConversationState
 
 # ── 1. Graph Transition Tests ────────────────────────────────────
 
-def test_graph_ambiguity_clarification():
+@patch("httpx.post")
+def test_graph_ambiguity_clarification(mock_post):
     """Test transition: ambiguous -> clarify -> end."""
+    
+    def mock_post_side_effect(url, **kwargs):
+        class MockResponse:
+            def __init__(self, json_data, status_code):
+                self.json_data = json_data
+                self.status_code = status_code
+            def json(self): return self.json_data
+            def raise_for_status(self): pass
+            
+        if "catalog/search" in url:
+            return MockResponse({"documents": []}, 200)
+        elif "plan" in url:
+            return MockResponse({
+                "intent": "AMBIGUOUS",
+                "clarification_options": ["Option 1", "Option 2"]
+            }, 200)
+            
+    mock_post.side_effect = mock_post_side_effect
+    
     state = ConversationState(
         tenant_id="acme",
         question="Can you clarify the revenue?",
@@ -23,7 +43,7 @@ def test_graph_ambiguity_clarification():
     # Should stop at classification because 'clarify' triggers needs_clarification
     assert result["status"] == "needs_clarification"
     assert "clarification_options" in result
-    assert len(result["clarification_options"]) > 0
+    assert len(result["clarification_options"]) == 2
 
 @patch("httpx.post")
 def test_graph_happy_path(mock_post):

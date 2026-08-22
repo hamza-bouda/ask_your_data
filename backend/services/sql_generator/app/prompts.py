@@ -14,6 +14,10 @@ RULES:
 4. Ensure the query is valid PostgreSQL.
 5. Do NOT include any markdown formatting or sql block syntax inside the `sql_query` field of your structured output; just the raw SQL.
 6. The semantic plan provides the certified tables, metrics, and dimensions you MUST use. Prioritize the expressions and logic provided in the semantic plan over your own interpretations.
+7. Use the chat history to resolve conversational references or apply previous filters/dimensions if the user asks a follow-up question (e.g. "and for 2024?").
+
+CHAT HISTORY:
+{history}
 
 SEMANTIC PLAN:
 {semantic_plan}

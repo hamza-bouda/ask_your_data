@@ -180,8 +180,13 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
 
                 await emit(RunEventType.RUN_STARTED, "started", "running", {})
 
-                history_msgs = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(10).all()
-                chat_history = [{"role": m.role, "content": m.content} for m in reversed(history_msgs)]
+                history_msgs = db.query(Message).filter(Message.conversation_id == conversation_id).order_by(Message.created_at.desc()).limit(20).all()
+                chat_history = []
+                for m in reversed(history_msgs):
+                    hist_msg = {"role": m.role, "content": m.content}
+                    if m.payload:
+                        hist_msg["payload"] = m.payload
+                    chat_history.append(hist_msg)
 
                 initial_state = ConversationState(
                     tenant_id=tenant_id,

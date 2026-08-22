@@ -118,6 +118,7 @@ def get_dashboard(
     tenant_id: str = Query(...),
     user_id: str = Query(...),
     is_admin: bool = Query(False),
+    source_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     dashboard = db.query(Dashboard).filter(Dashboard.id == dashboard_id).first()
@@ -129,8 +130,12 @@ def get_dashboard(
     items = db.query(DashboardItem).filter(DashboardItem.dashboard_id == dashboard_id).order_by(DashboardItem.order).all()
     items_data = []
     for item in items:
-        # Fetch the message to include the actual chart spec / results
         msg = db.query(Message).filter(Message.id == item.source_message_id).first()
+        
+        # Enforce source isolation: only return items belonging to the requested source
+        if msg and source_id and msg.conversation.source_id != source_id:
+            continue
+            
         payload = msg.payload if msg else {}
         items_data.append({
             "id": item.id,
@@ -271,13 +276,19 @@ def export_results(
     format: str = Query("csv"),
     tenant_id: str = Query(...),
     user_id: str = Query(...),
+    source_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     if format != "csv":
         raise HTTPException(status_code=400, detail="Unsupported format")
         
     msg = db.query(Message).filter(Message.id == message_id).first()
-    if not msg or msg.conversation.tenant_id != tenant_id:
+    
+    is_forbidden = not msg or msg.conversation.tenant_id != tenant_id
+    if msg and source_id and msg.conversation.source_id != source_id:
+        is_forbidden = True
+        
+    if is_forbidden:
         audit = ExportAudit(tenant_id=tenant_id, user_id=user_id, source_message_id=message_id, format=format, status="denied")
         db.add(audit)
         db.commit()
