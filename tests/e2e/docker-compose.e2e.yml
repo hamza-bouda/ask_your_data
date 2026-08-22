@@ -1,12 +1,20 @@
-# Minimal e2e compose stack overriding main
-# Could define mocks or specific env vars here
+name: askyourdata-e2e
+
 include:
   - ../../infra/compose/docker-compose.yml
 
 services:
-  sql-generator:
+  catalog:
+    build:
+      context: ../..
+      dockerfile: backend/services/catalog/Dockerfile.e2e
     environment:
-      - LLM_PROVIDER=mock
+      CATALOG_EMBEDDINGS_ENABLED: "false"
+      FERNET_KEY: ${FERNET_KEY}
   semantic-router:
     environment:
-      - LLM_PROVIDER=mock
+      # The E2E scenario uses catalogue discovery and needs no provider key.
+      LLM_PROVIDER: mock
+  sql-generator:
+    environment:
+      LLM_PROVIDER: mock
