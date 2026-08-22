@@ -4,7 +4,7 @@ import { useLocation } from 'react-router-dom';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import SaveToDashboardDialog from '../components/SaveToDashboardDialog';
-import { getConversations, createConversation, getConversation, getRun, sendMessage, setActiveSourceId, streamRunEvents, waitForRun, getDataSources, getActiveSourceId } from '../services/api';
+import { getConversations, createConversation, getConversation, getRun, sendMessage, setActiveSourceId, streamRunEvents, waitForRun, getDataSources, getActiveSourceId, getTables } from '../services/api';
 
 function BusinessProvenancePanel({ provenance }) {
   if (!provenance || Object.keys(provenance).length === 0) return null;
@@ -30,6 +30,7 @@ export default function ConversationsPage() {
   const [sources, setSources] = useState([]);
   const [runStage, setRunStage] = useState(null);
   const [savingMessage, setSavingMessage] = useState(null);
+  const [suggestedQuestions, setSuggestedQuestions] = useState([]);
   
   const location = useLocation();
   const initialMessage = location.state?.initialMessage;
@@ -84,6 +85,21 @@ export default function ConversationsPage() {
           await loadConversationMessages(convs[0].id);
         } else {
           setMessages([{ role: 'assistant', content: "Bonjour ! Je suis AskYourData. Posez-moi une question sur vos données (ex: 'Combien y a-t-il d'utilisateurs ?')." }]);
+        }
+        
+        // Fetch tables for contextual examples
+        try {
+          const tablesResponse = await getTables();
+          const tableNames = (tablesResponse.tables || []).map(t => t.table_name);
+          if (tableNames.length > 0) {
+            const examples = [];
+            if (tableNames.length >= 1) examples.push(`Combien y a-t-il de ${tableNames[0]} ?`);
+            if (tableNames.length >= 2) examples.push(`Montre-moi les ${tableNames[1]} par date`);
+            if (tableNames.length >= 3) examples.push(`Quel est le top 5 des ${tableNames[2]} ?`);
+            setSuggestedQuestions(examples);
+          }
+        } catch (e) {
+          console.warn("Could not fetch tables for suggestions", e);
         }
       } catch (error) {
         console.error("Failed to load conversations", error);
@@ -395,6 +411,22 @@ export default function ConversationsPage() {
               <div className="typing-dot"></div>
             </div>
           )}
+          
+          {messages.length <= 1 && suggestedQuestions.length > 0 && !isLoading && (
+             <div className="suggested-questions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '16px 20px', margin: '0 auto', maxWidth: '800px', width: '100%' }}>
+               {suggestedQuestions.map((q, idx) => (
+                 <button 
+                   key={idx} 
+                   className="btn-secondary" 
+                   style={{ fontSize: '0.85rem', padding: '6px 12px', borderRadius: '16px' }}
+                   onClick={() => handleSend(null, q)}
+                 >
+                   {q}
+                 </button>
+               ))}
+             </div>
+          )}
+          
           <div ref={messagesEndRef} />
         </div>
 

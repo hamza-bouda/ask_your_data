@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database } from 'lucide-react';
+import { Database, Loader2 } from 'lucide-react';
 import { login } from '../services/api';
 
 export default function Login() {
@@ -27,42 +27,52 @@ export default function Login() {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#0f172a' }}>
-      <div style={{ padding: '2rem', backgroundColor: '#1e293b', borderRadius: '12px', width: '100%', maxWidth: '400px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '2rem' }}>
-          <Database size={48} color="#3b82f6" style={{ marginBottom: '1rem' }} />
-          <h2 style={{ color: 'white', margin: 0 }}>Ask Your Data</h2>
-          <p style={{ color: '#94a3b8', margin: '0.5rem 0 0 0' }}>Connectez-vous à votre espace</p>
+    <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <div className="glass-panel" style={{ padding: '2.5rem', width: '100%', maxWidth: '420px', margin: '0 16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '2rem', textAlign: 'center' }}>
+          <div style={{ padding: '16px', background: 'rgba(59, 130, 246, 0.1)', borderRadius: '50%', marginBottom: '1rem' }}>
+            <Database size={48} color="var(--accent)" />
+          </div>
+          <h2 style={{ color: 'var(--text-main)', margin: 0, fontSize: '1.75rem', fontWeight: '700' }}>Ask Your Data</h2>
+          <p style={{ color: 'var(--text-muted)', margin: '0.5rem 0 0 0', fontSize: '1rem' }}>Connectez-vous à votre espace</p>
         </div>
         
-        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div>
-            <label style={{ color: '#cbd5e1', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'block' }}>Nom d'utilisateur</label>
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Nom d'utilisateur</label>
             <input 
               type="text" 
               value={username} 
               onChange={e => setUsername(e.target.value)}
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white' }}
+              placeholder="Saisissez votre identifiant"
+              required
             />
           </div>
-          <div>
-            <label style={{ color: '#cbd5e1', fontSize: '0.875rem', marginBottom: '0.5rem', display: 'block' }}>Mot de passe</label>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Mot de passe</label>
             <input 
               type="password" 
               value={password} 
               onChange={e => setPassword(e.target.value)}
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white' }}
+              placeholder="Saisissez votre mot de passe"
+              required
             />
           </div>
           
-          {error && <div style={{ color: '#ef4444', fontSize: '0.875rem' }}>{error}</div>}
+          {error && <div className="error-message" style={{ marginBottom: 0 }}>{error}</div>}
           
           <button 
             type="submit" 
+            className="btn-primary"
             disabled={isLoading}
-            style={{ marginTop: '1rem', width: '100%', padding: '0.75rem', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
+            style={{ marginTop: '0.5rem', width: '100%', padding: '0.875rem' }}
           >
-            {isLoading ? "Connexion..." : "Se connecter"}
+            {isLoading ? (
+              <>
+                <Loader2 size={18} className="spinner" />
+                <span>Connexion...</span>
+              </>
+            ) : "Se connecter"}
           </button>
         </form>
       </div>

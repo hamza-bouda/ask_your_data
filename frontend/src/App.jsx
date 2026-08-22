@@ -14,6 +14,8 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const DashboardsPage = lazy(() => import('./pages/DashboardsPage'));
 const PlatformHealthPage = lazy(() => import('./pages/PlatformHealthPage'));
 const DashboardDetailPage = lazy(() => import('./pages/DashboardDetailPage'));
+const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
+const HelpPage = lazy(() => import('./pages/HelpPage'));
 
 import './App.css';
 
@@ -40,6 +42,8 @@ function App() {
           <Route path="admin/data" element={<AdminDataPage />} />
           <Route path="admin/health" element={<PlatformHealthPage />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="onboarding" element={<OnboardingPage />} />
+          <Route path="help" element={<HelpPage />} />
         </Route>
         </Routes>
       </Suspense>

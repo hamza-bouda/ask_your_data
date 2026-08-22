@@ -78,28 +78,60 @@ const ChartRenderer = ({ data, chartSpec }) => {
     return d;
   }, [data, sortOrder, spec.y_field]);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 100;
+
   const renderTable = () => {
     const keys = Object.keys(processedData[0]);
+    const totalPages = Math.ceil(processedData.length / rowsPerPage);
+    const startIndex = (currentPage - 1) * rowsPerPage;
+    const paginatedData = processedData.slice(startIndex, startIndex + rowsPerPage);
+
     return (
-      <div style={{ overflowX: 'auto', marginTop: '16px' }} role="region" aria-label="Tableau de données" tabIndex="0">
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-          <thead>
-            <tr>
-              {keys.map((k) => <th key={k} scope="col" style={{ padding: '8px', borderBottom: '2px solid var(--border)', color: 'var(--text)' }}>{k}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {processedData.map((row, i) => (
-              <tr key={i}>
-                {keys.map((k) => (
-                  <td key={k} style={{ padding: '8px', borderBottom: '1px solid var(--border)', color: 'var(--text)' }}>
-                    {typeof row[k] === 'number' ? formatValue(row[k], numberFormat) : String(row[k] ?? '')}
-                  </td>
-                ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
+        <div style={{ overflowX: 'auto' }} role="region" aria-label="Tableau de données" tabIndex="0">
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead>
+              <tr>
+                {keys.map((k) => <th key={k} scope="col" style={{ padding: '8px', borderBottom: '2px solid var(--border-color)', color: 'var(--text-main)' }}>{k}</th>)}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paginatedData.map((row, i) => (
+                <tr key={startIndex + i}>
+                  {keys.map((k) => (
+                    <td key={k} style={{ padding: '8px', borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)' }}>
+                      {typeof row[k] === 'number' ? formatValue(row[k], numberFormat) : String(row[k] ?? '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '8px' }}>
+            <button 
+              className="btn-secondary" 
+              disabled={currentPage === 1} 
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              style={{ padding: '4px 12px', fontSize: '0.9rem' }}
+            >
+              Précédent
+            </button>
+            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+              Page {currentPage} sur {totalPages}
+            </span>
+            <button 
+              className="btn-secondary" 
+              disabled={currentPage === totalPages} 
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              style={{ padding: '4px 12px', fontSize: '0.9rem' }}
+            >
+              Suivant
+            </button>
+          </div>
+        )}
       </div>
     );
   };
