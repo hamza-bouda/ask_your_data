@@ -2,9 +2,14 @@
 
 import httpx
 from langgraph.graph import StateGraph, START, END
-from observability import get_tracer
+from observability import get_tracer, inject_context
+from prometheus_client import Counter
 
 tracer = get_tracer("orchestrator_graph")
+
+GRAPH_CLARIFICATIONS = Counter("graph_clarifications_total", "Total clarifications requested")
+GRAPH_SQL_ERRORS = Counter("graph_sql_errors_total", "Total SQL execution errors")
+GRAPH_POLICY_DENIALS = Counter("graph_policy_denials_total", "Total policy denials in SQL execution")
 
 
 try:
@@ -31,7 +36,7 @@ def retrieve_node(state: ConversationState) -> dict:
                 "query": state.question,
                 "tenant_id": state.tenant_id,
                 "source_id": state.source_id,
-            }, timeout=10.0)
+            }, headers=inject_context(), timeout=10.0)
             response.raise_for_status()
             data = response.json()
         
@@ -54,12 +59,13 @@ def plan_node(state: ConversationState) -> dict:
                 "query": state.question,
                 "chat_history": state.chat_history,
                 "context": state.context
-            }, timeout=10.0)
+            }, headers=inject_context(), timeout=10.0)
             response.raise_for_status()
             data = response.json()
         
             intent = data.get("intent")
             if intent == "AMBIGUOUS":
+                GRAPH_CLARIFICATIONS.inc()
                 return {
                     "status": "needs_clarification",
                     "clarification_options": [{"id": str(i), "text": opt} for i, opt in enumerate(data.get("clarification_options", []))]
@@ -110,7 +116,7 @@ def generate_sql_node(state: ConversationState) -> dict:
                 "semantic_plan": state.semantic_plan if state.semantic_plan else {},
                 "schema_definition": state.context if state.context else {},
                 "chat_history": state.chat_history
-            }, timeout=10.0)
+            }, headers=inject_context(), timeout=10.0)
         
             response.raise_for_status()
             data = response.json()
@@ -136,7 +142,7 @@ def execute_sql_node(state: ConversationState) -> dict:
                 "sql_query": state.sql_query,
                 "tenant_id": state.tenant_id,
                 "source_id": state.source_id,
-            }, timeout=10.0)
+            }, headers=inject_context(), timeout=10.0)
         
             # If execution fails (e.g. safety check), trigger repair
             if response.status_code == 400:
@@ -145,11 +151,13 @@ def execute_sql_node(state: ConversationState) -> dict:
             
                 # Policy or strict safety errors shouldn't be blindly retried
                 if "policy" in error_msg.lower() or "denied" in error_msg.lower() or "forbidden" in error_msg.lower():
+                    GRAPH_POLICY_DENIALS.inc()
                     return {
                         "status": "error",
                         "error_message": f"La requête a été bloquée par les règles de sécurité : {error_msg}"
                     }
                 
+                GRAPH_SQL_ERRORS.inc()
                 return {
                     "status": "sql_error",
                     "error_message": error_msg
@@ -179,7 +187,7 @@ def visualization_node(state: ConversationState) -> dict:
                 "results": state.results,
                 "semantic_plan": state.semantic_plan,
                 "question": state.question
-            }, timeout=5.0)
+            }, headers=inject_context(), timeout=5.0)
         
             response.raise_for_status()
             chart_spec = response.json()

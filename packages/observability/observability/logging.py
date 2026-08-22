@@ -3,7 +3,12 @@ import os
 import structlog
 from opentelemetry import trace
 
+import re
+
 SENSITIVE_KEYS = {"password", "token", "secret", "connection_string", "api_key", "sql_error", "openai_api_key"}
+
+# Matches JWTs and other common Bearer tokens
+BEARER_TOKEN_PATTERN = re.compile(r"Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*", re.IGNORECASE)
 
 def _redact_sensitive_data(logger, log_method, event_dict):
     """Redact sensitive keys from log event."""
@@ -16,6 +21,8 @@ def _redact_sensitive_data(logger, log_method, event_dict):
         if isinstance(val, str):
             if "://" in val and "@" in val and ":" in val: # Simple heuristic for postgres://user:pass@...
                 event_dict[key] = "***REDACTED_CONN_STR***"
+            elif BEARER_TOKEN_PATTERN.search(val):
+                event_dict[key] = BEARER_TOKEN_PATTERN.sub("Bearer ***REDACTED_TOKEN***", val)
                 
     return event_dict
 

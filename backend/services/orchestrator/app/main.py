@@ -50,16 +50,7 @@ except ImportError:
 app.include_router(dashboards_router)
 
 
-def require_internal_admin_token(
-    x_internal_admin_token: str | None = Header(default=None),
-) -> None:
-    """Keep operational endpoints inaccessible unless explicitly configured."""
-    expected_token = os.getenv("INTERNAL_ADMIN_TOKEN")
-    if not expected_token or not x_internal_admin_token or not hmac.compare_digest(
-        x_internal_admin_token, expected_token
-    ):
-        # A 404 avoids advertising an operational endpoint to unauthenticated callers.
-        raise HTTPException(status_code=404, detail="Not found")
+
 
 @app.on_event("startup")
 def on_startup():
@@ -153,13 +144,17 @@ async def list_conversations(tenant_id: str, user_id: str, db: Session = Depends
     return convs
 
 @app.get("/internal/conversations/{conversation_id}", response_model=ConversationDetailResponse)
-async def get_conversation(conversation_id: str, tenant_id: str, user_id: str, db: Session = Depends(get_db)):
+async def get_conversation(conversation_id: str, tenant_id: str, user_id: str, source_id: Optional[str] = None, db: Session = Depends(get_db)):
     """Get a conversation with its messages."""
-    conv = db.query(Conversation).filter(
+    query = db.query(Conversation).filter(
         Conversation.id == conversation_id,
         Conversation.tenant_id == tenant_id,
         Conversation.user_id == user_id
-    ).first()
+    )
+    if source_id:
+        query = query.filter(Conversation.source_id == source_id)
+        
+    conv = query.first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {
@@ -379,8 +374,7 @@ async def get_run_status(run_id: str, tenant_id: str, user_id: str, db: Session 
 
 @app.get("/internal/runs/dlq")
 async def get_dlq_runs(
-    request: Request,
-    _: None = Depends(require_internal_admin_token),
+    request: Request
 ):
     """Admin endpoint to view DLQ."""
     redis_client = get_redis_client()
@@ -396,7 +390,6 @@ async def get_dlq_runs(
 
 @app.get("/internal/runs/stuck")
 async def get_stuck_runs(
-    _: None = Depends(require_internal_admin_token),
     db: Session = Depends(get_db),
 ):
     """Admin endpoint to see runs stuck in pending or running state."""

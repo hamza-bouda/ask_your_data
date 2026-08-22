@@ -42,6 +42,20 @@ def create_service_app(
         response.headers["X-Contract-Version"] = CONTRACT_VERSION
         return response
 
+    import os
+    import hmac
+    
+    @app.middleware("http")
+    async def enforce_internal_admin_token(request: Request, call_next: Any) -> Any:
+        if request.url.path.startswith("/internal/"):
+            expected_token = os.getenv("INTERNAL_ADMIN_TOKEN")
+            # If the token is configured, enforce it. (Local dev might not set it).
+            if expected_token:
+                req_token = request.headers.get("x-internal-admin-token")
+                if not req_token or not hmac.compare_digest(req_token, expected_token):
+                    return JSONResponse(status_code=404, content={"detail": "Not found"})
+        return await call_next(request)
+
     # ── Exception handler: wrap all errors in ApiError ───────────
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(

@@ -706,7 +706,8 @@ def get_tables(request: Request, db: Session = Depends(get_db)):
                 "id": c.id,
                 "name": c.column_name, 
                 "type": c.data_type, 
-                "description": c.description
+                "description": c.description,
+                "is_nullable": c.is_nullable
             }
             if is_admin:
                 col_data["is_allowed"] = c.is_allowed
@@ -718,7 +719,10 @@ def get_tables(request: Request, db: Session = Depends(get_db)):
             "id": t.id,
             "table_name": t.table_name,
             "description": t.description,
-            "columns": cols
+            "columns": cols,
+            "primary_key": t.primary_key,
+            "foreign_keys": t.foreign_keys,
+            "indices": t.indices
         }
         if is_admin:
             table_data["is_allowed"] = t.is_allowed
@@ -731,7 +735,7 @@ def get_tables(request: Request, db: Session = Depends(get_db)):
 
 
 @app.get("/api/v1/catalog/tables/{table_name}/preview")
-def preview_table(table_name: str, request: Request, limit: int = 10, db: Session = Depends(get_db)):
+def preview_table(table_name: str, request: Request, limit: int = 10, offset: int = 0, db: Session = Depends(get_db)):
     """Read a bounded preview using only currently allowed table columns."""
     source = source_from_request(db, request, active_only=True)
     table = (
@@ -746,11 +750,11 @@ def preview_table(table_name: str, request: Request, limit: int = 10, db: Sessio
     if not columns:
         raise HTTPException(status_code=403, detail="No columns allowed for preview")
     quote = lambda identifier: '"' + identifier.replace('"', '""') + '"'
-    sql = f"SELECT {', '.join(quote(column) for column in columns)} FROM {quote(table.table_name)} LIMIT :limit"
+    sql = f"SELECT {', '.join(quote(column) for column in columns)} FROM {quote(table.table_name)} LIMIT :limit OFFSET :offset"
     try:
         engine = create_engine(decrypt_secret(source.connection_string))
         with engine.connect() as connection:
-            rows = connection.execute(text(sql), {"limit": min(max(limit, 1), 100)}).mappings().all()
+            rows = connection.execute(text(sql), {"limit": min(max(limit, 1), 100), "offset": max(offset, 0)}).mappings().all()
         return {"columns": columns, "rows": [dict(row) for row in rows]}
     except Exception:
         raise HTTPException(status_code=502, detail="Data preview is unavailable")

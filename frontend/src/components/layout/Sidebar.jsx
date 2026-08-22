@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Database, LayoutDashboard, Settings, HardDrive, LogOut, Plug, PanelsTopLeft } from 'lucide-react';
+import { MessageSquare, Database, LayoutDashboard, Settings, HardDrive, LogOut, Plug, PanelsTopLeft, Activity } from 'lucide-react';
 
 export default function Sidebar({ isOpen = false, onNavigate = () => {} }) {
   const navigate = useNavigate();
@@ -28,6 +28,7 @@ export default function Sidebar({ isOpen = false, onNavigate = () => {} }) {
   
   if (isAdmin) {
     navItems.push({ to: "/admin/data", icon: HardDrive, label: "Administration des données" });
+    navItems.push({ to: "/admin/health", icon: Activity, label: "Santé de la plateforme" });
   }
 
   return (

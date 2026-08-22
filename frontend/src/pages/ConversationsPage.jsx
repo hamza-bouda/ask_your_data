@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare, Save, CheckCircle } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import SaveToDashboardDialog from '../components/SaveToDashboardDialog';
@@ -29,6 +30,9 @@ export default function ConversationsPage() {
   const [sources, setSources] = useState([]);
   const [runStage, setRunStage] = useState(null);
   const [savingMessage, setSavingMessage] = useState(null);
+  
+  const location = useLocation();
+  const initialMessage = location.state?.initialMessage;
   
   const messagesEndRef = useRef(null);
   const hasDataResult = (message) => (
@@ -89,6 +93,91 @@ export default function ConversationsPage() {
     };
     initPage();
   }, []);
+
+  useEffect(() => {
+    if (initialMessage && !isLoadingHistory) {
+      handleNewConversationWithInitialMessage(initialMessage);
+      // Clear state to avoid resending on refresh
+      window.history.replaceState({}, document.title)
+    }
+  }, [initialMessage, isLoadingHistory]);
+
+  const handleNewConversationWithInitialMessage = async (message) => {
+    try {
+      const activeSource = getActiveSourceId();
+      const conv = await createConversation("Nouvelle analyse: " + message.substring(0, 20) + "...", activeSource);
+      setConversations((current) => [{ id: conv.id, title: conv.title, source_id: activeSource }, ...current]);
+      setConversationId(conv.id);
+      
+      // Enqueue the message directly
+      setMessages([
+        { role: 'assistant', content: "Analyse en cours..." }
+      ]);
+      
+      // Simulate sending the message
+      await sendInitialMessage(conv.id, message, activeSource);
+    } catch (error) {
+      console.error("Error creating conversation for initial message", error);
+    }
+  };
+
+  const sendInitialMessage = async (convId, text, sourceId) => {
+    if (!text || isLoading) return;
+    setMessages([{ role: 'user', content: text }]);
+    setIsLoading(true);
+    
+    try {
+      const queuedRun = await sendMessage(convId, text, sourceId);
+      setRunStage('En attente du traitement…');
+      try {
+        await streamRunEvents(queuedRun.run_id, (event) => {
+          const stages = {
+            run_started: 'Analyse de votre demande…',
+            retrieval_completed: 'Recherche du catalogue de données…',
+            planning: 'Préparation de la requête…',
+            sql_generating: 'Génération SQL…',
+            sql_validating: 'Validation de sécurité…',
+            query_executing: 'Exécution de la requête…',
+            visualization_generating: 'Préparation de la visualisation…',
+            clarification_requested: 'Une précision est nécessaire…',
+          };
+          setRunStage(stages[event.event_type] || 'Analyse en cours…');
+        });
+      } catch (streamError) {
+        console.warn('SSE unavailable, falling back to status polling', streamError);
+        await waitForRun(queuedRun.run_id);
+      }
+      const response = await getRun(queuedRun.run_id);
+
+      if (['failed', 'error'].includes(response.status)) {
+        throw new Error(response.error_message || "L'analyse n'a pas pu être terminée.");
+      }
+      
+      const payload = {
+        semantic_plan: response.semantic_plan,
+        results: response.results,
+        chart_spec: response.chart_spec,
+        sql_query: response.sql_draft?.sql_query || response.sql_query,
+        error_message: response.error_message,
+        clarification_options: response.clarification_options
+      };
+      
+      const aiMessage = {
+        id: response.final_message_id,
+        role: 'assistant',
+        content: response.response || "Voici les résultats de votre requête.",
+        payload: payload
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('Conversation run failed', error);
+      setMessages(prev => [...prev, { role: 'assistant', content: "Désolé, une erreur s'est produite." }]);
+    } finally {
+      setIsLoading(false);
+      setRunStage(null);
+    }
+  };
 
   const handleSelectConversation = async (id) => {
     if (id === conversationId) return;

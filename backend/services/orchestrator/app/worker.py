@@ -32,6 +32,8 @@ WORKER_TASKS_PROCESSED = Counter("worker_tasks_processed_total", "Total tasks pr
 WORKER_TASK_DURATION = Histogram("worker_task_duration_seconds", "Task processing duration")
 WORKER_DLQ_MESSAGES = Counter("worker_dlq_messages_total", "Total messages sent to DLQ")
 WORKER_RETRIES = Counter("worker_retries_total", "Total task retries")
+WORKER_WAIT_TIME = Histogram("worker_wait_time_seconds", "Time spent in queue before processing")
+WORKER_DLQ_DEPTH = Gauge("worker_dlq_depth", "Number of messages in DLQ")
 
 # Start Prometheus metrics server on port 8000
 start_http_server(8000)
@@ -81,6 +83,18 @@ async def claim_abandoned_messages(r: redis.Redis):
             
         await asyncio.sleep(30)
 
+async def monitor_dlq_depth(r: redis.Redis):
+    while True:
+        try:
+            depth = await r.xlen(DLQ_STREAM)
+            WORKER_DLQ_DEPTH.set(depth)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error monitoring DLQ depth: {e}")
+        
+        await asyncio.sleep(15)
+
 async def process_message(r: redis.Redis, message_id: str, data: dict):
     run_id = data.get("run_id")
     tenant_id = data.get("tenant_id")
@@ -107,6 +121,15 @@ async def process_message(r: redis.Redis, message_id: str, data: dict):
             source_id=source_id,
             conversation_id=conversation_id
         )
+
+        # Calculate queue wait time using Redis stream ID timestamp (format: ms-seq)
+        try:
+            msg_timestamp_ms = int(message_id.split('-')[0])
+            wait_time = (datetime.now(timezone.utc).timestamp() * 1000 - msg_timestamp_ms) / 1000.0
+            if wait_time > 0:
+                WORKER_WAIT_TIME.observe(wait_time)
+        except Exception as e:
+            pass
 
         with WORKER_TASK_DURATION.time():
 
@@ -317,6 +340,7 @@ async def main():
     
     # Start background task to claim abandoned messages
     asyncio.create_task(claim_abandoned_messages(r))
+    asyncio.create_task(monitor_dlq_depth(r))
 
     while True:
         try:

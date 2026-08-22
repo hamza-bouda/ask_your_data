@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Integer
+from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Integer, Boolean
 from sqlalchemy.orm import relationship
 
 try:
@@ -69,6 +69,9 @@ class Dashboard(Base):
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     visibility = Column(String, nullable=False, default="private") # 'private' or 'tenant_viewers'
+    archived = Column(Boolean, nullable=False, default=False)
+    filters = Column(JSON, nullable=True, default={})
+    last_refreshed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -81,8 +84,11 @@ class DashboardItem(Base):
     dashboard_id = Column(String, ForeignKey("dashboards.id"), nullable=False)
     source_message_id = Column(String, nullable=True) # Message containing the chart spec / data
     title = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
     order = Column(Integer, nullable=False, default=0)
     display_config = Column(JSON, nullable=True) # E.g., width, height, type override
+    payload_snapshot = Column(JSON, nullable=True) # Store results, chart_spec, sql_query, source_id, semantic_context, execution_date
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

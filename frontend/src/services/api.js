@@ -84,10 +84,14 @@ export const waitForRun = async (runId, timeoutMs = 60000) => {
  * Consume the run SSE stream with fetch so the JWT remains in the
  * Authorization header. Native EventSource cannot send that header.
  */
-export const streamRunEvents = async (runId, onEvent, signal) => {
+export const streamRunEvents = async (runId, onEvent, signal, lastEventId = null) => {
   const token = localStorage.getItem('token');
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (lastEventId) headers['Last-Event-ID'] = lastEventId;
+  
   const response = await fetch(`${API_URL}/v1/runs/${runId}/events`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers,
     signal,
   });
   if (!response.ok || !response.body) {
@@ -113,6 +117,11 @@ export const streamRunEvents = async (runId, onEvent, signal) => {
         .join('');
       if (!payload) continue;
       const event = JSON.parse(payload);
+      const msgIdMatch = message.match(/id:\s*(.+)/);
+      const msgId = msgIdMatch ? msgIdMatch[1] : null;
+      if (msgId) {
+        event.lastEventId = msgId;
+      }
       onEvent(event);
       terminal = ['result_ready', 'run_failed'].includes(event.event_type);
       if (terminal) break;
@@ -147,8 +156,8 @@ export const getTables = async () => {
   return response.data;
 };
 
-export const getTablePreview = async (tableName, limit = 10) => {
-  const response = await api.get(`/api/v1/catalog/tables/${encodeURIComponent(tableName)}/preview`, { params: { limit } });
+export const getTablePreview = async (tableName, limit = 10, offset = 0) => {
+  const response = await api.get(`/api/v1/catalog/tables/${encodeURIComponent(tableName)}/preview`, { params: { limit, offset } });
   return response.data;
 };
 
@@ -184,8 +193,8 @@ export const updateColumnPolicy = async (sourceId, tableId, columnId, isAllowed)
   return response.data;
 };
 
-export const getAdminAudit = async () => {
-  const response = await api.get('/v1/datasources/audit');
+export async function getAdminAudit() {
+  const response = await api.get('/v1/audit');
   return response.data;
 };
 
@@ -201,5 +210,15 @@ export const createAdminMetric = async (sourceId, metricData) => {
 
 export const updateAdminMetric = async (sourceId, metricId, changes) => {
   const response = await api.patch(`/api/v1/catalog/metrics/${metricId}`, changes, { headers: { 'X-Source-Id': sourceId } });
+  return response.data;
+};
+
+export const getAdminStuckRuns = async () => {
+  const response = await api.get('/v1/admin/health/runs/stuck');
+  return response.data;
+};
+
+export const getAdminDlqRuns = async () => {
+  const response = await api.get('/v1/admin/health/runs/dlq');
   return response.data;
 };

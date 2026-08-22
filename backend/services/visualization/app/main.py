@@ -65,7 +65,7 @@ def _requested_chart_type(question: str | None) -> ChartType | None:
         return ChartType.DONUT
     if any(term in normalized for term in ("barre horizontale", "horizontal bar", "horizontal")):
         return ChartType.HORIZONTAL_BAR
-    if any(term in normalized for term in ("barre", "bar chart", "histogramme")):
+    if any(term in normalized for term in ("barre", "bar chart")):
         return ChartType.BAR
     if any(term in normalized for term in ("aire", "area chart")):
         return ChartType.AREA
@@ -75,8 +75,15 @@ def _requested_chart_type(question: str | None) -> ChartType | None:
         return ChartType.SCATTER
     if any(term in normalized for term in ("radar", "toile")):
         return ChartType.RADAR
+    if any(term in normalized for term in ("empilé", "stacked")):
+        return ChartType.STACKED_BAR
+    if any(term in normalized for term in ("carte de chaleur", "heatmap")):
+        return ChartType.HEATMAP
+    if any(term in normalized for term in ("cascade", "waterfall")):
+        return ChartType.WATERFALL
+    if "histogramme" in normalized and "bar" not in normalized:
+        return ChartType.HISTOGRAM
     return None
-
 
 @app.post("/internal/chart-spec", response_model=ChartSpec)
 async def generate_chart_spec(request: ChartSpecRequest):
@@ -201,6 +208,74 @@ async def generate_chart_spec(request: ChartSpecRequest):
             y_field=numeric_cols[1],
             reason="Deux mesures numériques permettent un nuage de points."
         )
+
+    # --- Validations spécifiques pour les nouveaux types demandés ---
+    if requested_type == ChartType.STACKED_BAR:
+        if len(cat_cols) >= 1 and len(numeric_cols) >= 1:
+            return ChartSpec(
+                chart_type=ChartType.STACKED_BAR,
+                title="Barres empilées",
+                x_field=cat_cols[0],
+                y_field=numeric_cols[0],
+                reason="Type de graphique demandé explicitement par l'utilisateur."
+            )
+        else:
+            return ChartSpec(
+                chart_type=ChartType.TABLE,
+                title="Tableau de résultats",
+                reason="Le graphique en barres empilées nécessite au moins une catégorie et une mesure.",
+                warnings=["Impossible d'afficher un graphique empilé avec ces données."]
+            )
+
+    if requested_type == ChartType.HEATMAP:
+        if len(cat_cols) + len(date_cols) >= 1 and len(numeric_cols) >= 1:
+            return ChartSpec(
+                chart_type=ChartType.HEATMAP,
+                title="Carte de chaleur",
+                x_field=date_cols[0] if date_cols else cat_cols[0],
+                y_field=numeric_cols[0],
+                reason="Type de graphique demandé explicitement."
+            )
+        else:
+            return ChartSpec(
+                chart_type=ChartType.TABLE,
+                title="Tableau de résultats",
+                reason="La carte de chaleur nécessite au moins une dimension et une mesure.",
+                warnings=["Impossible d'afficher une carte de chaleur avec ces données."]
+            )
+
+    if requested_type == ChartType.WATERFALL:
+        if (len(cat_cols) >= 1 or len(date_cols) >= 1) and len(numeric_cols) >= 1:
+            return ChartSpec(
+                chart_type=ChartType.WATERFALL,
+                title="Graphique en cascade",
+                x_field=date_cols[0] if date_cols else cat_cols[0],
+                y_field=numeric_cols[0],
+                reason="Type de graphique demandé explicitement."
+            )
+        else:
+            return ChartSpec(
+                chart_type=ChartType.TABLE,
+                title="Tableau de résultats",
+                reason="Le graphique en cascade nécessite une dimension et une mesure.",
+                warnings=["Impossible d'afficher un graphique en cascade avec ces données."]
+            )
+
+    if requested_type == ChartType.HISTOGRAM:
+        if len(numeric_cols) >= 1:
+            return ChartSpec(
+                chart_type=ChartType.HISTOGRAM,
+                title="Histogramme",
+                y_field=numeric_cols[0],
+                reason="Type de graphique demandé explicitement."
+            )
+        else:
+            return ChartSpec(
+                chart_type=ChartType.TABLE,
+                title="Tableau de résultats",
+                reason="L'histogramme nécessite au moins une mesure numérique.",
+                warnings=["Impossible d'afficher un histogramme sans données numériques."]
+            )
 
     # Fallback to Table
     return ChartSpec(

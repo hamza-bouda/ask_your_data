@@ -1,0 +1,38 @@
+groups:
+  - name: ask_your_data_alerts
+    rules:
+      - alert: HighSqlErrorRate
+        expr: rate(graph_sql_errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taux d'erreur SQL élevé détecté"
+          description: "Plus de 5% des requêtes SQL échouent lors de l'exécution sur les 5 dernières minutes."
+
+      - alert: DeadLetterQueueNotEmpty
+        expr: worker_dlq_depth > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Des messages s'accumulent dans la DLQ"
+          description: "La file d'attente des lettres mortes (DLQ) contient {{ $value }} messages qui ont échoué après plusieurs tentatives."
+
+      - alert: HighWorkerWaitTime
+        expr: histogram_quantile(0.95, rate(worker_wait_time_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Temps d'attente Worker élevé"
+          description: "Le 95ème percentile du temps d'attente des workers dépasse 10 secondes."
+
+      - alert: HighPolicyDenialRate
+        expr: rate(graph_policy_denials_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taux de refus de politique élevé"
+          description: "Plus de 10% des requêtes ont été bloquées par la politique de sécurité."

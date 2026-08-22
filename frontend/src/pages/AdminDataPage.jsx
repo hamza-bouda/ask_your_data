@@ -54,8 +54,8 @@ function AuditPanel({ audits }) {
   return (
     <section className="card admin-panel">
       <div className="admin-panel-heading"><div><h2><Activity size={19} /> Journal d’audit</h2><p>Historique des changements de gouvernance de ce tenant.</p></div></div>
-      {audits.length === 0 ? <p className="muted-copy">Aucune action enregistrée.</p> : <div className="table-scroll"><table className="data-table"><thead><tr><th>Date</th><th>Utilisateur</th><th>Action</th><th>Cible</th></tr></thead><tbody>
-        {audits.map((audit) => <tr key={audit.id}><td>{new Date(audit.timestamp).toLocaleString()}</td><td>{audit.user_id}</td><td><span className="audit-action">{audit.action}</span></td><td><code>{audit.target}</code></td></tr>)}
+      {audits.length === 0 ? <p className="muted-copy">Aucune action enregistrée.</p> : <div className="table-scroll"><table className="data-table"><thead><tr><th>Date</th><th>Type</th><th>Utilisateur</th><th>Action</th><th>Cible</th></tr></thead><tbody>
+        {audits.map((audit) => <tr key={audit.id}><td>{new Date(audit.timestamp).toLocaleString()}</td><td><span className="type-badge">{audit.type || 'catalog'}</span></td><td>{audit.user_id}</td><td><span className="audit-action">{audit.action}</span></td><td><code>{audit.target}</code></td></tr>)}
       </tbody></table></div>}
     </section>
   );

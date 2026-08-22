@@ -95,9 +95,30 @@ def test_visualization_fallback_table_no_chart_pattern():
         ("un radar", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "radar"),
         ("un nuage de points", [{"x": 2, "y": 4}, {"x": 3, "y": 8}], "scatter"),
         ("affiche le tableau", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "table"),
+        ("graphique empilé", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "stacked_bar"),
+        ("une carte de chaleur", [{"date": "2024-01-01", "value": 2}, {"date": "2024-01-02", "value": 4}], "heatmap"),
+        ("en cascade", [{"category": "A", "value": 2}, {"category": "B", "value": 4}], "waterfall"),
+        ("un histogramme", [{"value": 2}, {"value": 4}], "histogram"),
     ],
 )
 def test_visualization_honors_explicit_supported_type(question, results, expected):
     response = client.post("/internal/chart-spec", json={"results": results, "question": question})
     assert response.status_code == 200
     assert response.json()["chart_type"] == expected
+
+
+@pytest.mark.parametrize(
+    ("question", "results"),
+    [
+        ("graphique empilé", [{"value": 2}]), # Pas de catégorie
+        ("carte de chaleur", [{"category": "A"}]), # Pas de mesure numérique
+        ("en cascade", [{"value": 2}]), # Pas de catégorie/dimension
+        ("histogramme", [{"category": "A"}]), # Pas de numérique
+    ],
+)
+def test_visualization_fallback_when_incompatible(question, results):
+    response = client.post("/internal/chart-spec", json={"results": results, "question": question})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chart_type"] == "table"
+    assert len(data["warnings"]) > 0

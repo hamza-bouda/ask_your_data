@@ -54,3 +54,15 @@ async def require_admin(context: TenantContext = Depends(get_tenant_context)) ->
     if "admin" not in context.roles:
         raise HTTPException(status_code=403, detail="Admin access required")
     return context
+
+async def require_analyst(context: TenantContext = Depends(get_tenant_context)) -> TenantContext:
+    """FastAPI dependency to ensure the user has at least the 'analyst' role."""
+    if not any(role in context.roles for role in ["admin", "analyst"]):
+        raise HTTPException(status_code=403, detail="Analyst access required")
+    return context
+
+async def require_viewer(context: TenantContext = Depends(get_tenant_context)) -> TenantContext:
+    """FastAPI dependency to ensure the user has at least the 'viewer' role."""
+    if not any(role in context.roles for role in ["admin", "analyst", "viewer"]):
+        raise HTTPException(status_code=403, detail="Viewer access required")
+    return context

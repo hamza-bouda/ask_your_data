@@ -23,6 +23,10 @@ class ChartType(StrEnum):
     SCATTER = "scatter"
     RADAR = "radar"
     METRIC = "metric"
+    STACKED_BAR = "stacked_bar"
+    HEATMAP = "heatmap"
+    WATERFALL = "waterfall"
+    HISTOGRAM = "histogram"
 
 
 class ChartSpec(BaseModel):
