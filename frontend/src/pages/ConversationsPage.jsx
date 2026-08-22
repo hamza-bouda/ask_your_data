@@ -4,7 +4,7 @@ import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import DebugPanel from '../components/DebugPanel';
 import SaveToDashboardDialog from '../components/SaveToDashboardDialog';
-import { getConversations, createConversation, getConversation, getRun, sendMessage, streamRunEvents, waitForRun } from '../services/api';
+import { getConversations, createConversation, getConversation, getRun, sendMessage, setActiveSourceId, streamRunEvents, waitForRun } from '../services/api';
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState([]);
@@ -72,6 +72,7 @@ export default function ConversationsPage() {
         setConversations(convs);
         if (convs.length > 0) {
           setConversationId(convs[0].id);
+          if (convs[0].source_id) setActiveSourceId(convs[0].source_id);
           await loadConversationMessages(convs[0].id);
         } else {
           setMessages([{ role: 'assistant', content: "Bonjour ! Je suis AskYourData. Posez-moi une question sur vos données (ex: 'Combien y a-t-il d'utilisateurs ?')." }]);
@@ -85,6 +86,8 @@ export default function ConversationsPage() {
 
   const handleSelectConversation = async (id) => {
     if (id === conversationId) return;
+    const selectedConversation = conversations.find((conversation) => conversation.id === id);
+    if (selectedConversation?.source_id) setActiveSourceId(selectedConversation.source_id);
     setConversationId(id);
     await loadConversationMessages(id);
   };
@@ -114,6 +117,8 @@ export default function ConversationsPage() {
 
     try {
       let currentConvId = conversationId;
+      const currentConversation = conversations.find((conversation) => conversation.id === currentConvId);
+      if (currentConversation?.source_id) setActiveSourceId(currentConversation.source_id);
       if (!currentConvId) {
         const newConv = await createConversation();
         currentConvId = newConv.id;
