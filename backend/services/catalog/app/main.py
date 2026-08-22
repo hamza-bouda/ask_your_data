@@ -35,11 +35,17 @@ cipher_suite = None
 def startup_event():
     global embedder, cipher_suite
     create_tables()
-    if SentenceTransformer is None:
-        raise RuntimeError("sentence-transformers must be installed to run the catalog service")
-    print("Loading embedding model...")
-    embedder = SentenceTransformer('BAAI/bge-small-en-v1.5')
-    print("Embedding model loaded.")
+    embeddings_enabled = os.getenv("CATALOG_EMBEDDINGS_ENABLED", "true").lower() not in {"0", "false", "no"}
+    if embeddings_enabled:
+        if SentenceTransformer is None:
+            raise RuntimeError("sentence-transformers must be installed to run catalog embeddings")
+        print("Loading embedding model...")
+        embedder = SentenceTransformer('BAAI/bge-small-en-v1.5')
+        print("Embedding model loaded.")
+    else:
+        # The lexical retrieval fallback remains available. This makes E2E and
+        # constrained deployments deterministic without downloading a model.
+        print("Catalog embeddings disabled; using lexical retrieval fallback.")
     
     app_env = os.getenv("APP_ENV", "development").lower()
     is_production = app_env in {"production", "prod"}
