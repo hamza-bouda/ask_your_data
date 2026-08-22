@@ -6,12 +6,12 @@ import {
 import {
   createAdminMetric, getAdminAudit, getAdminCatalog, getAdminDatasources,
   getActiveSourceId, getAdminMetrics, registerDatabase, syncAdminDatasource, updateColumnPolicy,
-  updateTablePolicy,
+  updateTablePolicy, updateAdminMetric
 } from '../services/api';
 
-const EMPTY_METRIC = { name: '', description: '', sql_expression: '' };
+const EMPTY_METRIC = { name: '', description: '', sql_expression: '', format: 'number', time_grains: '', dimensions: '' };
 
-function MetricPanel({ metrics, isOpen, metric, onMetricChange, onOpen, onClose, onSubmit }) {
+function MetricPanel({ metrics, isOpen, metric, onMetricChange, onOpen, onClose, onSubmit, onToggleStatus }) {
   return (
     <section className="card admin-panel">
       <div className="admin-panel-heading">
@@ -26,12 +26,24 @@ function MetricPanel({ metrics, isOpen, metric, onMetricChange, onOpen, onClose,
           <label>Nom<input value={metric.name} onChange={(event) => onMetricChange({ ...metric, name: event.target.value })} required /></label>
           <label>Description<input value={metric.description} onChange={(event) => onMetricChange({ ...metric, description: event.target.value })} /></label>
           <label>Expression SQL<input className="sql-input" value={metric.sql_expression} onChange={(event) => onMetricChange({ ...metric, sql_expression: event.target.value })} placeholder="SUM(total_amount)" required /></label>
+          <label>Format (optionnel)<input value={metric.format} onChange={(event) => onMetricChange({ ...metric, format: event.target.value })} placeholder="currency, percent, number" /></label>
+          <label>Dimensions compatibles (séparées par une virgule)<input value={metric.dimensions} onChange={(event) => onMetricChange({ ...metric, dimensions: event.target.value })} placeholder="country, product_category" /></label>
+          <label>Grains de temps (séparés par une virgule)<input value={metric.time_grains} onChange={(event) => onMetricChange({ ...metric, time_grains: event.target.value })} placeholder="day, week, month" /></label>
           <div className="admin-actions"><button className="btn-primary" type="submit">Enregistrer</button><button className="btn-secondary" type="button" onClick={onClose}>Annuler</button></div>
         </form>
       )}
       {metrics.length === 0 && !isOpen ? <p className="muted-copy">Aucune métrique définie pour cette source.</p> : (
-        <div className="table-scroll"><table className="data-table"><thead><tr><th>Nom</th><th>Description</th><th>SQL</th></tr></thead><tbody>
-          {metrics.map((item) => <tr key={item.id}><td>{item.name}</td><td>{item.description || '—'}</td><td><code>{item.sql_expression}</code></td></tr>)}
+        <div className="table-scroll"><table className="data-table"><thead><tr><th>Statut</th><th>Nom</th><th>Description</th><th>SQL</th><th>Format</th><th>Dimensions</th></tr></thead><tbody>
+          {metrics.map((item) => (
+            <tr key={item.id}>
+              <td><label className="switch"><input type="checkbox" checked={item.is_active} onChange={() => onToggleStatus(item)} /><span className="slider round" /></label></td>
+              <td className={item.is_active ? '' : 'denied-label'}>{item.name}</td>
+              <td>{item.description || '—'}</td>
+              <td><code>{item.sql_expression}</code></td>
+              <td>{item.format || 'number'}</td>
+              <td>{(item.dimensions || []).join(', ')}</td>
+            </tr>
+          ))}
         </tbody></table></div>
       )}
     </section>
@@ -160,9 +172,24 @@ export default function AdminDataPage() {
     event.preventDefault();
     if (!sourceData?.id) return;
     try {
-      await createAdminMetric(sourceData.id, newMetric);
+      const payload = { ...newMetric };
+      if (typeof payload.dimensions === 'string') {
+        payload.dimensions = payload.dimensions.split(',').map(d => d.trim()).filter(Boolean);
+      }
+      if (typeof payload.time_grains === 'string') {
+        payload.time_grains = payload.time_grains.split(',').map(d => d.trim()).filter(Boolean);
+      }
+      await createAdminMetric(sourceData.id, payload);
       setNewMetric(EMPTY_METRIC); setShowMetricForm(false); await fetchMetrics();
-    } catch { setError('La métrique n’a pas pu être enregistrée.'); }
+    } catch (err) { setError(err.response?.data?.detail || 'La métrique n’a pas pu être enregistrée.'); }
+  };
+
+  const handleToggleMetricStatus = async (metric) => {
+    if (!sourceData?.id) return;
+    try {
+      await updateAdminMetric(sourceData.id, metric.id, { is_active: !metric.is_active });
+      await fetchMetrics();
+    } catch { setError('Impossible de modifier le statut de la métrique.'); }
   };
 
   if (isFetching) return <div className="page-container center-content"><RefreshCw className="spinner" size={32} /></div>;
@@ -172,7 +199,7 @@ export default function AdminDataPage() {
     {sourceData?.connected && !showForm ? <section className="card source-card admin-source-card"><div className="source-card-header"><div className="source-title"><Database size={24} color="#10b981" /><h3>{sourceData.name || 'Base de données principale'} · {sourceData.dialect}</h3></div><span className="status-badge success"><CheckCircle size={14} />Connectée</span></div><div className="source-card-body"><div className="stat-item"><span className="stat-value">{sourceData.table_count}</span><span className="stat-label">Tables détectées</span></div><div className="stat-item"><span className="stat-value admin-date">{sourceData.last_synced_at ? new Date(sourceData.last_synced_at).toLocaleString() : 'Jamais'}</span><span className="stat-label">Dernière synchronisation</span></div></div><div className="source-card-actions"><button className="btn-primary" onClick={handleSync} disabled={isLoading}><RefreshCw className={isLoading ? 'spinner' : ''} size={16} />Synchroniser</button><button className="btn-secondary" onClick={() => setShowForm(true)}>Modifier la connexion</button></div></section> : <section className="card connection-form-card"><div className="form-header"><Link size={32} color="#3b82f6" /><h3>{sourceData?.connected ? 'Modifier la connexion' : 'Connecter une base de données'}</h3><p>Utilisez impérativement un compte de base en lecture seule.</p></div><form onSubmit={handleConnect} className="connection-form"><div className="form-group"><label>Chaîne de connexion</label><input type="password" value={connectionString} onChange={(event) => setConnectionString(event.target.value)} placeholder="postgresql://user:password@host:5432/database" required /></div><div className="form-actions">{sourceData?.connected && <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Annuler</button>}<button type="submit" className="btn-primary" disabled={isLoading}>{isLoading ? 'Connexion…' : 'Enregistrer'}</button></div></form></section>}
     {sourceData?.connected && <section className="admin-tabs"><div className="tabs-header"><button className={activeTab === 'catalog' ? 'active' : ''} onClick={() => setActiveTab('catalog')}>Catalogue & politiques</button><button className={activeTab === 'metrics' ? 'active' : ''} onClick={() => setActiveTab('metrics')}>Métriques métier</button><button className={activeTab === 'audit' ? 'active' : ''} onClick={() => setActiveTab('audit')}>Journal d’audit</button></div>
       {activeTab === 'catalog' && <div className="explorer-layout admin-catalog"><aside className="explorer-sidebar"><div className="explorer-sidebar-header"><h3><TableIcon size={18} />Tables ({tables.length})</h3><button className="danger-button" onClick={handleDenyAll} disabled={isLoading}>Tout interdire</button></div><div className="table-list">{tables.map((table) => <div key={table.id} className={`table-list-item ${selectedTable?.id === table.id ? 'active' : ''}`}><button onClick={() => setSelectedTable(table)}><TableIcon size={16} /><span className={table.is_allowed ? '' : 'denied-label'}>{table.table_name}</span></button><label className="switch"><input type="checkbox" checked={Boolean(table.is_allowed)} onChange={() => handleTableToggle(table)} /><span className="slider round" /></label></div>)}</div></aside><main className="explorer-content">{selectedTable ? <div className="table-details-card"><div className="table-header"><div><h2>{selectedTable.table_name}</h2><p>Une table et chacune de ses colonnes doivent être autorisées pour être exposées à l’agent.</p></div></div>{!selectedTable.is_allowed && <div className="policy-warning"><Lock size={18} /><span>Cette table est interdite : ses colonnes ne sont pas accessibles.</span></div>}<h3>Colonnes ({selectedTable.columns.length})</h3><div className="table-scroll"><table className="data-table"><thead><tr><th>Autoriser</th><th>Nom</th><th>Type</th><th>Modifié par</th></tr></thead><tbody>{selectedTable.columns.map((column) => <tr key={column.id}><td><label className="switch"><input type="checkbox" checked={Boolean(column.is_allowed)} onChange={() => handleColumnToggle(column)} disabled={!selectedTable.is_allowed} /><span className="slider round" /></label></td><td className={column.is_allowed ? '' : 'denied-label'}>{column.name}</td><td><span className="type-badge">{column.type}</span></td><td>{column.modified_by || 'Système'}</td></tr>)}</tbody></table></div></div> : <div className="empty-state"><Settings size={44} /><p>Sélectionnez une table pour gérer ses accès.</p></div>}</main></div>}
-      {activeTab === 'metrics' && <MetricPanel metrics={metrics} isOpen={showMetricForm} metric={newMetric} onMetricChange={setNewMetric} onOpen={() => setShowMetricForm(true)} onClose={() => setShowMetricForm(false)} onSubmit={handleCreateMetric} />}
+      {activeTab === 'metrics' && <MetricPanel metrics={metrics} isOpen={showMetricForm} metric={newMetric} onMetricChange={setNewMetric} onOpen={() => setShowMetricForm(true)} onClose={() => setShowMetricForm(false)} onSubmit={handleCreateMetric} onToggleStatus={handleToggleMetricStatus} />}
       {activeTab === 'audit' && <AuditPanel audits={audits} />}
     </section>}
   </div></div>;

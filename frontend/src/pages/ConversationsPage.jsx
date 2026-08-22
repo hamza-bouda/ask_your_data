@@ -1,9 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare, Save } from 'lucide-react';
+import { Send, PanelRightClose, PanelRightOpen, MessageSquarePlus, MessageSquare, Save, CheckCircle } from 'lucide-react';
 import MessageBubble from '../components/MessageBubble';
 import ChartRenderer from '../components/ChartRenderer';
 import SaveToDashboardDialog from '../components/SaveToDashboardDialog';
 import { getConversations, createConversation, getConversation, getRun, sendMessage, setActiveSourceId, streamRunEvents, waitForRun, getDataSources, getActiveSourceId } from '../services/api';
+
+function BusinessProvenancePanel({ provenance }) {
+  if (!provenance || Object.keys(provenance).length === 0) return null;
+  return (
+    <div className="business-provenance-panel" style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px', margin: '8px 48px', fontSize: '0.9rem', color: '#166534' }}>
+      <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle size={16} /> Provenance métier (Métrique certifiée)</strong>
+      <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {provenance.metric_name && <div><strong>Métrique:</strong> {provenance.metric_name}</div>}
+        {provenance.format && <div><strong>Format attendu:</strong> {provenance.format}</div>}
+        {provenance.tables && provenance.tables.length > 0 && <div><strong>Tables:</strong> {provenance.tables.join(', ')}</div>}
+      </div>
+    </div>
+  );
+}
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState([]);
@@ -236,6 +250,10 @@ export default function ConversationsPage() {
           ) : messages.map((msg, idx) => (
             <div key={idx}>
               <MessageBubble role={msg.role === 'assistant' ? 'ai' : msg.role} content={msg.content} />
+              
+              {msg.payload?.semantic_plan?.business_provenance && Object.keys(msg.payload.semantic_plan.business_provenance).length > 0 && (
+                <BusinessProvenancePanel provenance={msg.payload.semantic_plan.business_provenance} />
+              )}
               
               {hasDataResult(msg) && (
                 <div className="chat-result-container">

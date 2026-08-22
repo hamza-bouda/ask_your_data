@@ -119,6 +119,9 @@ class SemanticMetric(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=True)
     sql_expression: Mapped[str] = mapped_column(String, nullable=False)
+    format: Mapped[str] = mapped_column(String(50), nullable=True, default="number")
+    time_grains: Mapped[list[str]] = mapped_column(JSON, nullable=True, default=list)
+    dimensions: Mapped[list[str]] = mapped_column(JSON, nullable=True, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     

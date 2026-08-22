@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet
+import sqlglot
+import sqlglot.expressions as exp
+import re
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -353,6 +356,72 @@ class SemanticMetricRequest(BaseModel):
     name: str
     description: Optional[str] = None
     sql_expression: str
+    format: Optional[str] = "number"
+    time_grains: Optional[List[str]] = []
+    dimensions: Optional[List[str]] = []
+
+class SemanticMetricUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sql_expression: Optional[str] = None
+    format: Optional[str] = None
+    time_grains: Optional[List[str]] = None
+    dimensions: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+def validate_metric_expression(sql_expression: str, source_id: str, db: Session):
+    forbidden_keywords = [
+        r"\bINSERT\b", r"\bUPDATE\b", r"\bDELETE\b", r"\bDROP\b",
+        r"\bALTER\b", r"\bGRANT\b", r"\bREVOKE\b", r"\bTRUNCATE\b",
+        r"\bCREATE\b", r"\bREPLACE\b", r"\bEXECUTE\b", r"\bMERGE\b"
+    ]
+    upper_expr = sql_expression.upper()
+    for keyword in forbidden_keywords:
+        if re.search(keyword, upper_expr):
+            raise HTTPException(status_code=400, detail="Mutating keywords are forbidden in metric expressions.")
+            
+    try:
+        parsed = sqlglot.parse(sql_expression, read="postgres")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse SQL: {e}")
+        
+    allowed_tables = db.query(TableSchema).filter(TableSchema.source_id == source_id, TableSchema.is_allowed == True).all()
+    allowed_schema = {t.table_name.lower(): {c.column_name.lower() for c in t.columns if c.is_allowed} for t in allowed_tables}
+
+    for ast in parsed:
+        if not ast: continue
+        forbidden_types = (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter, exp.Command)
+        for forbidden_type in forbidden_types:
+            if list(ast.find_all(forbidden_type)):
+                raise HTTPException(status_code=400, detail="Mutating operations are forbidden.")
+                
+        for table_node in ast.find_all(exp.Table):
+            t_name = table_node.name.lower()
+            if t_name not in allowed_schema:
+                raise HTTPException(status_code=403, detail=f"Table '{table_node.name}' is not allowed or does not exist.")
+                
+        aliases = {table_node.alias.lower(): table_node.name.lower() for table_node in ast.find_all(exp.Table) if table_node.alias}
+        referenced_tables = {table_node.name.lower() for table_node in ast.find_all(exp.Table)}
+        projection_aliases = {expression.alias.lower() for expression in ast.find_all(exp.Alias) if expression.alias}
+
+        for column_node in ast.find_all(exp.Column):
+            column_name = column_node.name.lower()
+            qualifier = (column_node.table or "").lower()
+            
+            if column_name == "*": continue
+            
+            if qualifier:
+                table_name = aliases.get(qualifier, qualifier)
+                if table_name not in allowed_schema or column_name not in allowed_schema.get(table_name, set()):
+                    raise HTTPException(status_code=403, detail=f"Column '{column_node.name}' in table '{table_name}' is not allowed.")
+                continue
+                
+            if column_name in projection_aliases: continue
+            
+            if referenced_tables:
+                matching = [t for t in referenced_tables if column_name in allowed_schema.get(t, set())]
+                if len(matching) == 0:
+                    raise HTTPException(status_code=403, detail=f"Column '{column_node.name}' is not allowed or ambiguous.")
 
 @app.post("/api/v1/catalog/metrics")
 def create_metric(body: SemanticMetricRequest, request: Request, db: Session = Depends(get_db)):
@@ -361,12 +430,17 @@ def create_metric(body: SemanticMetricRequest, request: Request, db: Session = D
     correlation_id = request.headers.get("x-correlation-id")
     
     source = source_from_request(db, request)
+    validate_metric_expression(body.sql_expression, source.id, db)
+    
     metric = SemanticMetric(
         tenant_id=tenant_id,
         source_id=source.id,
         name=body.name,
         description=body.description,
-        sql_expression=body.sql_expression
+        sql_expression=body.sql_expression,
+        format=body.format,
+        time_grains=body.time_grains,
+        dimensions=body.dimensions
     )
     db.add(metric)
     db.flush()
@@ -393,8 +467,47 @@ def create_metric(body: SemanticMetricRequest, request: Request, db: Session = D
 @app.get("/api/v1/catalog/metrics")
 def get_metrics(request: Request, db: Session = Depends(get_db)):
     source = source_from_request(db, request)
-    metrics = db.query(SemanticMetric).filter(SemanticMetric.source_id == source.id, SemanticMetric.is_active == True).all()
-    return {"metrics": [{"id": m.id, "name": m.name, "description": m.description, "sql_expression": m.sql_expression} for m in metrics]}
+    metrics = db.query(SemanticMetric).filter(SemanticMetric.source_id == source.id).all()
+    return {"metrics": [{"id": m.id, "name": m.name, "description": m.description, "sql_expression": m.sql_expression, "format": m.format, "time_grains": m.time_grains, "dimensions": m.dimensions, "is_active": m.is_active} for m in metrics]}
+
+@app.patch("/api/v1/catalog/metrics/{metric_id}")
+def update_metric(metric_id: int, body: SemanticMetricUpdateRequest, request: Request, db: Session = Depends(get_db)):
+    tenant_id = request.headers.get("x-tenant-id", "acme")
+    user_id = request.headers.get("x-user-id", "system")
+    correlation_id = request.headers.get("x-correlation-id")
+    
+    source = source_from_request(db, request)
+    metric = db.query(SemanticMetric).filter(SemanticMetric.id == metric_id, SemanticMetric.source_id == source.id).first()
+    if not metric:
+        raise HTTPException(status_code=404, detail="Metric not found")
+        
+    if body.sql_expression is not None:
+        validate_metric_expression(body.sql_expression, source.id, db)
+        metric.sql_expression = body.sql_expression
+        
+    if body.name is not None: metric.name = body.name
+    if body.description is not None: metric.description = body.description
+    if body.format is not None: metric.format = body.format
+    if body.time_grains is not None: metric.time_grains = body.time_grains
+    if body.dimensions is not None: metric.dimensions = body.dimensions
+    if body.is_active is not None: metric.is_active = body.is_active
+    
+    # Update RAG Document
+    doc = db.query(CatalogDocument).filter(
+        CatalogDocument.source_id == source.id,
+        CatalogDocument.doc_type == "metric",
+        CatalogDocument.metadata_json.op("->>")("metric_id") == str(metric.id)
+    ).first()
+    
+    if doc:
+        doc_content = f"Metric {metric.name}: {metric.description}. Expression: {metric.sql_expression}"
+        doc.content = doc_content
+        doc.is_allowed = metric.is_active
+        if embedder: doc.embedding = embedder.encode(doc_content).tolist()
+        
+    log_audit(db, tenant_id, user_id, "update_metric", f"metric:{metric.name}", correlation_id)
+    db.commit()
+    return {"status": "success"}
 
 
 

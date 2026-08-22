@@ -190,11 +190,16 @@ export const getAdminAudit = async () => {
 };
 
 export const getAdminMetrics = async (sourceId) => {
-  const response = await api.get(`/v1/datasources/${sourceId}/metrics`);
+  const response = await api.get('/api/v1/catalog/metrics', { headers: { 'X-Source-Id': sourceId } });
   return response.data;
 };
 
 export const createAdminMetric = async (sourceId, metricData) => {
-  const response = await api.post(`/v1/datasources/${sourceId}/metrics`, metricData);
+  const response = await api.post('/api/v1/catalog/metrics', metricData, { headers: { 'X-Source-Id': sourceId } });
+  return response.data;
+};
+
+export const updateAdminMetric = async (sourceId, metricId, changes) => {
+  const response = await api.patch(`/api/v1/catalog/metrics/${metricId}`, changes, { headers: { 'X-Source-Id': sourceId } });
   return response.data;
 };

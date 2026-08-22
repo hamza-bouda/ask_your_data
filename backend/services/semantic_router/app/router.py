@@ -32,6 +32,10 @@ class SemanticPlanOut(BaseModel):
     period: str | None = Field(None, description="The time period for the query.")
     grain: str | None = Field(None, description="The temporal or spatial grain.")
     reasoning: str | None = Field(None, description="Brief explanation of why these tables and metrics were selected.")
+    business_provenance: dict = Field(
+        default_factory=dict, 
+        description="Dictionary containing 'metric_name', 'metric_description', 'format' or 'tables' to pass business context."
+    )
 
 
 def _get_llm():
@@ -114,9 +118,11 @@ def create_semantic_plan(query: str, context: dict, chat_history: list) -> dict:
         "\nIMPORTANT CONTEXT:\n"
         "You must use 'history' to resolve conversational references (e.g. 'ce graphique', 'et pour 2024 ?', 'ces clients'). "
         "If the user asks a follow-up question, use the 'payload' (semantic_plan, sql_query) from the history to infer the missing tables, metrics, or filters.\n"
-        "\nIf the intent is DATA_QUERY or CHART_GENERATION, use the provided schema context (which includes tables, relations, metrics) "
+        "\nIf the intent is DATA_QUERY or CHART_GENERATION, use the provided schema context (which includes tables, relations, and CERTIFIED METRICS) "
         "to fill in 'source_tables', 'metric', 'dimensions', 'filters', 'period', 'grain' and 'reasoning'. "
-        "If you cannot determine the metric or tables even with history, classify as AMBIGUOUS."
+        "CRITICAL: If the user requests a metric (e.g., 'revenu', 'chiffre d'affaires'), you MUST use the corresponding certified metric from the context. "
+        "If multiple certified metrics or synonyms match the user's intent, DO NOT GUESS. Classify as AMBIGUOUS and provide clarification options. "
+        "Also populate 'business_provenance' with metadata about the certified metric chosen, such as 'metric_name' and 'format', to provide transparency to the user."
     )
     
     prompt = ChatPromptTemplate.from_messages([

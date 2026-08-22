@@ -13,7 +13,9 @@ RULES:
 3. Handle case-insensitivity using ILIKE where appropriate for text matching.
 4. Ensure the query is valid PostgreSQL.
 5. Do NOT include any markdown formatting or sql block syntax inside the `sql_query` field of your structured output; just the raw SQL.
-6. The semantic plan provides the certified tables, metrics, and dimensions you MUST use. Prioritize the expressions and logic provided in the semantic plan over your own interpretations.
+6. The semantic plan provides the certified tables, metrics, dimensions, and business_provenance you MUST use. 
+   - CRITICAL: You MUST use the exact `sql_expression` of the certified metric provided in the business_provenance or semantic plan context. DO NOT invent your own aggregation or formula for the metric.
+   - Respect the specified numeric `format` (e.g. currency, percent) if possible by casting or formatting in PostgreSQL.
 7. Use the chat history to resolve conversational references or apply previous filters/dimensions if the user asks a follow-up question (e.g. "and for 2024?").
 
 CHAT HISTORY:
