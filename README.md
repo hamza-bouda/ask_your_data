@@ -159,9 +159,3 @@ ask_your_data/
 ├── docs/                      # SRE runbooks, operational guides, and architecture specifications
 └── .github/workflows/         # Multi-matrix CI/CD pipeline
 ```
-
----
-
-## License and Compliance
-
-Licensed under the MIT License. Designed strictly for read-only analytical database access without data mutation privileges.
